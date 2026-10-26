@@ -23,6 +23,12 @@ enum Commands {
         definition: PathBuf,
         #[arg(short, long)]
         output: Option<PathBuf>,
+        /// Generate through an existing local provider instead of the seed.
+        #[arg(long, requires = "contract")]
+        via: Option<SocketAddr>,
+        /// Bundle describing the exact GenerateBundle contract.
+        #[arg(long, requires = "via")]
+        contract: Option<PathBuf>,
     },
     /// Run a generated endpoint. Loopback only; Ctrl-C stops it.
     Serve {
@@ -51,12 +57,14 @@ enum Commands {
 enum Provider {
     Shadow,
     InterfaceCheck,
+    GenerateBundle,
 }
 impl From<Provider> for Mode {
     fn from(value: Provider) -> Self {
         match value {
             Provider::Shadow => Self::Shadow,
             Provider::InterfaceCheck => Self::InterfaceCheck,
+            Provider::GenerateBundle => Self::GenerateBundle,
         }
     }
 }
@@ -79,8 +87,22 @@ async fn run() -> Result<()> {
                 serde_json::json!({"valid": true, "digest": bundle.digest})
             );
         }
-        Commands::Generate { definition, output } => {
-            let bundle = brick_contract::build(&std::fs::read_to_string(definition)?)?;
+        Commands::Generate {
+            definition,
+            output,
+            via,
+            contract,
+        } => {
+            let source = std::fs::read_to_string(definition)?;
+            let bundle = if let Some(address) = via {
+                let contract = brick_contract::load(&contract.expect("clap requires contract"))?;
+                tokio::select! {
+                    result = brick_runtime::generate::remote(&contract, address, &source) => result?,
+                    _ = tokio::signal::ctrl_c() => anyhow::bail!("generation cancelled"),
+                }
+            } else {
+                brick_contract::build(&source)?
+            };
             let output = output.unwrap_or_else(|| brick_contract::default_output(&bundle));
             brick_contract::publish(&bundle, &output)?;
             println!("{}", output.display());

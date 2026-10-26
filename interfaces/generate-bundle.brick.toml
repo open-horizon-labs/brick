@@ -1,0 +1,64 @@
+format_version = 1
+schema = '''
+syntax = "proto3";
+package brick.generate_bundle.v1;
+
+// Pure generation: accepts a complete UTF-8 Brick definition, writes no published
+// files, and returns its entire artifact. No imports or external contract types.
+// Definition TOML: format_version=1, schema=standalone proto3 string, optional
+// [[cases]] with unique nonempty name, method, request_json, response_json strings.
+// Exactly one package/service with unary methods; no schema imports. JSON cases
+// must decode against their method's local request/response messages.
+// Input limit: 256 KiB UTF-8. RPC response limit: 1 MiB; larger artifacts fail
+// RESOURCE_EXHAUSTED. Compiler/IO failures are gRPC INTERNAL, never rejections.
+service GenerateBundle { rpc Generate(GenerateRequest) returns (GenerateResponse); }
+message GenerateRequest { string source = 1; }
+message GenerateResponse {
+  oneof outcome { Bundle bundle = 1; Rejection rejection = 2; }
+}
+message Rejection {
+  // INVALID_DEFINITION: malformed TOML/version/size; IMPORTS_FORBIDDEN;
+  // INVALID_SCHEMA: invalid protobuf or unsupported shape; INVALID_CASES.
+  string code = 1;
+}
+message CompilerIdentity { string version = 1; string executable_digest = 2; }
+message Bundle {
+  uint32 format_version = 1;
+  string generator = 2;
+  CompilerIdentity compiler = 3;
+  string source = 4;
+  // Serialized protobuf FileDescriptorSet for interface.proto, one file only.
+  bytes descriptor = 5;
+  // Generated relative Rust filenames mapped to complete UTF-8 source contents.
+  map<string, string> rust_bindings = 6;
+  // Lowercase SHA-256 of compact JSON in this field order, digest="".
+  // JSON uses snake_case keys, descriptor as integer array, rust_bindings sorted
+  // lexically by key, compiler fields version then executable_digest; strings
+  // use JSON UTF-8 escaping. Identifies content, not trusted provenance.
+  string digest = 7;
+}
+'''
+
+[[cases]]
+name = "malformed definition"
+method = "Generate"
+request_json = '''{"source": "not toml"}'''
+response_json = '{"rejection": {"code": "INVALID_DEFINITION"}}'
+
+[[cases]]
+name = "unsupported definition version"
+method = "Generate"
+request_json = '''{"source": "format_version = 2\nschema = \"x\""}'''
+response_json = '{"rejection": {"code": "INVALID_DEFINITION"}}'
+
+[[cases]]
+name = "import forbidden"
+method = "Generate"
+request_json = '''{"source": "format_version = 1\nschema = 'import \"other.proto\";'"}'''
+response_json = '{"rejection": {"code": "IMPORTS_FORBIDDEN"}}'
+
+[[cases]]
+name = "invalid schema"
+method = "Generate"
+request_json = '''{"source": "format_version = 1\nschema = \"not protobuf\""}'''
+response_json = '{"rejection": {"code": "INVALID_SCHEMA"}}'

@@ -22,10 +22,26 @@ server per shadow (unnecessary repeated compilation); dynamic descriptor serving
 using established protobuf and gRPC libraries (selected). The seed never implements
 its own protobuf parser or gRPC framing.
 
-## Next migration sequence
+## Second increment: implemented
 
-- Define `GenerateBundle` independently, including its own local input/output
-  types. Give it a shell and conformance cases before moving its implementation.
+`GenerateBundle` now has a standalone definition, generated shadow, and real Rust
+adapter. `generate --via ADDRESS --contract BUNDLE` uses that boundary and publishes
+only after validating the returned artifact and matching its source to the request.
+The service never chooses publication paths. Tests compare its full successful
+output with the seed, run the returned generator bundle, and use the generator to
+produce a runnable checker. Rejection cases cover invalid definitions, imports,
+and schemas; additional tests cover invalid cases, substitution, tampering,
+nonclobber publication, and cancellation during generator compiler execution.
+
+This moves generation behind an executable interface; it does not remove the
+trusted generation algorithm from the seed or create a fully self-hosted build.
+The provider is selected explicitly in the bootstrap runtime. Shadows remain
+finite ordered examples. Successful generated artifacts depend on the actual
+compiler identity, so success equivalence is tested separately from the portable
+static rejection examples. The 1 MiB RPC ceiling is narrower than the 8 MiB disk
+bundle ceiling and is an explicit bootstrap transport limit.
+
+## Next migration sequence
 - Define `RunScenarios` independently. Replace only it with its real provider while
   generation and other dependencies can remain shadows.
 - Add explicit project graph wiring, provider selection, typed generated clients

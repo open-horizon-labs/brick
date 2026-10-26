@@ -18,10 +18,22 @@ impl Drop for OwnedChild {
 
 #[test]
 fn ctrl_c_reaps_active_compiler_before_cli_exit() {
-    let bundle = brick_contract::build(include_str!(
-        "../../../interfaces/interface-check.brick.toml"
-    ))
-    .unwrap();
+    cancellation(
+        include_str!("../../../interfaces/interface-check.brick.toml"),
+        "interface-check",
+    );
+}
+
+#[test]
+fn ctrl_c_reaps_generator_compiler_before_cli_exit() {
+    cancellation(
+        include_str!("../../../interfaces/generate-bundle.brick.toml"),
+        "generate-bundle",
+    );
+}
+
+fn cancellation(source: &str, mode: &str) {
+    let bundle = brick_contract::build(source).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let bundle_path = dir.path().join("bundle.json");
     brick_contract::publish(&bundle, &bundle_path).unwrap();
@@ -34,12 +46,7 @@ fn ctrl_c_reaps_active_compiler_before_cli_exit() {
     fs::set_permissions(&compiler, fs::Permissions::from_mode(0o755)).unwrap();
     let mut cli = OwnedChild(
         Command::new(env!("CARGO_BIN_EXE_brick"))
-            .args([
-                "verify",
-                bundle_path.to_str().unwrap(),
-                "--mode",
-                "interface-check",
-            ])
+            .args(["verify", bundle_path.to_str().unwrap(), "--mode", mode])
             .env("PATH", dir.path())
             .stdout(Stdio::null())
             .stderr(Stdio::null())

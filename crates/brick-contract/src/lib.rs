@@ -362,9 +362,23 @@ pub fn build(source: &str) -> Result<Bundle> {
     let definition = parse(source)?;
     schema_input(&definition.schema)?;
     let compiler = Compiler::discover()?;
-    let descriptor = compiler.compile(&definition.schema, &AtomicBool::new(false))?;
+    build_with_compiler(source, &compiler, &AtomicBool::new(false))
+}
+
+/// Generate with an explicitly pinned compiler and caller-owned cancellation.
+pub fn build_with_compiler(
+    source: &str,
+    compiler: &Compiler,
+    cancel: &AtomicBool,
+) -> Result<Bundle> {
+    ensure!(!cancel.load(Ordering::Acquire), "generation cancelled");
+    let definition = parse(source)?;
+    let descriptor = compiler.compile(&definition.schema, cancel)?;
     let pool = validate_descriptor(&descriptor)?;
-    validate_cases(&definition, &pool)?;
+    validate_cases(&definition, &pool).map_err(|error| SchemaRejection {
+        code: "INVALID_CASES",
+        detail: error.to_string(),
+    })?;
     let dir = tempfile::tempdir()?;
     prost_build::Config::new()
         .out_dir(dir.path())
@@ -382,12 +396,13 @@ pub fn build(source: &str) -> Result<Bundle> {
     let mut bundle = Bundle {
         format_version: FORMAT,
         generator: GENERATOR.into(),
-        compiler: compiler.identity,
+        compiler: compiler.identity.clone(),
         source: source.into(),
         descriptor,
         rust_bindings,
         digest: String::new(),
     };
+    ensure!(!cancel.load(Ordering::Acquire), "generation cancelled");
     bundle.digest = bundle.identity()?;
     Ok(bundle)
 }

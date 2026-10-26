@@ -1,4 +1,5 @@
 mod codec;
+pub mod generate;
 
 use anyhow::{Context, Result, ensure};
 use axum::{
@@ -36,6 +37,7 @@ const MAX_MESSAGE: usize = 1024 * 1024;
 pub enum Mode {
     Shadow,
     InterfaceCheck,
+    GenerateBundle,
 }
 
 #[derive(Default)]
@@ -87,6 +89,37 @@ impl Runtime {
                 let response =
                     message(descriptor.output(), &case.response_json).map_err(internal)?;
                 state.consumed += 1;
+                Ok(response.encode_to_vec().into())
+            }
+            Mode::GenerateBundle => {
+                let source = input
+                    .get_field_by_name("source")
+                    .and_then(|v| v.as_str().map(str::to_owned))
+                    .ok_or_else(|| Status::invalid_argument("missing source"))?;
+                let permit = self
+                    .compiler_slots
+                    .clone()
+                    .acquire_owned()
+                    .await
+                    .map_err(internal)?;
+                let compiler = self
+                    .compiler
+                    .clone()
+                    .ok_or_else(|| Status::internal("compiler unavailable"))?;
+                let cancel = self.cancelled.clone();
+                let output = descriptor.output();
+                let response = tokio::task::spawn_blocking(move || {
+                    let _permit = permit;
+                    generate::invoke(&source, &compiler, &cancel, output)
+                })
+                .await
+                .map_err(internal)?
+                .map_err(internal)?;
+                if response.encoded_len() > MAX_MESSAGE {
+                    return Err(Status::resource_exhausted(
+                        "generated bundle exceeds 1 MiB RPC limit",
+                    ));
+                }
                 Ok(response.encode_to_vec().into())
             }
             Mode::InterfaceCheck => {
@@ -240,7 +273,13 @@ pub async fn start(bundle: &Bundle, mode: Mode, address: SocketAddr) -> Result<R
             "real checker requires Brick's exact InterfaceCheck contract"
         );
     }
-    let compiler = if mode == Mode::InterfaceCheck {
+    if mode == Mode::GenerateBundle {
+        ensure!(
+            definition.schema == brick_contract::parse(generate::SCHEMA)?.schema,
+            "real generator requires Brick's exact GenerateBundle contract"
+        );
+    }
+    let compiler = if mode != Mode::Shadow {
         Some(tokio::task::spawn_blocking(brick_contract::Compiler::discover).await??)
     } else {
         None
@@ -487,8 +526,14 @@ mod tests {
         assert!(b.assert_complete().is_err());
         let address = a.address;
         drop(a);
-        tokio::task::yield_now().await;
-        assert!(tokio::net::TcpStream::connect(address).await.is_err());
+        // Abort is scheduled, not synchronous; allow bounded task teardown.
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while tokio::net::TcpStream::connect(address).await.is_ok() {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("dropped listener did not close");
         b.shutdown().await.unwrap();
     }
 }

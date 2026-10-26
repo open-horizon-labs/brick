@@ -67,6 +67,44 @@ bindings, compiler/generator identities, and a digest over those contents. Servi
 loads the descriptor directly. Typed provider/client code generation is not yet
 implemented; the dynamic client and server already use the same wire contract.
 
+## Generate Brick through Brick
+
+The second real component is **GenerateBundle**. Its [standalone contract](interfaces/generate-bundle.brick.toml)
+contains the complete artifact shape and digest rules. The generator returns an
+artifact over gRPC; the CLI validates it, checks that it belongs to the submitted
+source, and publishes it without overwriting files.
+
+Bootstrap the generator once:
+
+```sh
+target/debug/brick generate interfaces/generate-bundle.brick.toml --output .brick/generator.json
+target/debug/brick verify .brick/generator.json
+target/debug/brick verify .brick/generator.json --mode generate-bundle
+target/debug/brick serve .brick/generator.json --mode generate-bundle
+```
+
+In another terminal, using the printed port, generate the generator itself:
+
+```sh
+target/debug/brick generate interfaces/generate-bundle.brick.toml \
+  --via 127.0.0.1:PORT --contract .brick/generator.json \
+  --output .brick/generated-generator.json
+target/debug/brick verify .brick/generated-generator.json --mode generate-bundle
+```
+
+The authored cases cover rejection behavior, so their receipts attest to those
+cases only. Success-path tests additionally compare the complete remotely generated
+artifact with the seed output, run the returned generator bundle, and generate a
+checker bundle that passes real-provider verification. Artifact identities include
+the compiler identity, so success comparisons use the same local compiler.
+
+The service response is limited to 1 MiB; larger generated artifacts fail explicitly.
+Malformed definitions, schemas, imports, and cases return declared rejection codes;
+compiler/IO failures remain RPC failures. The generator publishes no files itself.
+Cancelling a remote CLI call leaves the separately owned service running; its active
+compiler work remains bounded by the ten-second compiler deadline. Stopping the
+service cancels and reaps its compiler. Neither path constitutes an OS sandbox.
+
 ## Build Brick with Brick
 
 The first real component is **InterfaceCheck**. Its standalone definition can be
@@ -74,8 +112,9 @@ served as a generated shadow, then replaced by its Rust implementation without
 changing the consumer contract. That implementation calls the bootstrap checking
 kernel; the component tests exercise it over real local gRPC.
 
-The trusted seed still owns definition loading, compiler invocation, generation,
-runtime dispatch, and the test runner. Those are visible bootstrap responsibilities,
+The generator now also runs behind its own Brick boundary. Its algorithm still
+uses the trusted seed kernel for definition loading, compiler invocation, and
+binding generation. Runtime dispatch and the test runner remain seed responsibilities. Those are visible bootstrap responsibilities,
 not a claim of complete self-hosting. See [the bootstrap plan](docs/bootstrap.md).
 
 The crates have separate roles:
@@ -83,7 +122,7 @@ The crates have separate roles:
 | Crate | Responsibility |
 | --- | --- |
 | `brick-contract` | Standalone definition validation, descriptors, generated bindings, atomic bundle publication |
-| `brick-runtime` | Descriptor-driven shadow serving, first real provider, gRPC calls, verification receipts |
+| `brick-runtime` | Descriptor-driven shadow serving, real provider adapters, gRPC calls, verification receipts |
 | `brick-cli` | Command parsing and lifecycle orchestration |
 
 ## Evidence and limits
