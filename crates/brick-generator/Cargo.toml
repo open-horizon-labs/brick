@@ -6,6 +6,7 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+brick-compiler-contract = { path = "../../contracts/compiler" }
 brick-rpc = { path = "../brick-rpc" }
 clap.workspace = true
 prost-reflect.workspace = true

@@ -44,7 +44,9 @@ async fn run() -> Result<()> {
     let compiler = tokio::select! {result=tokio::task::spawn_blocking(move ||brick_compiler::Compiler::discover_with_cancel(&token))=>result??,_=tokio::signal::ctrl_c()=>anyhow::bail!("startup cancelled")};
     let mut server = brick_rpc::start(
         &bundle,
-        Arc::new(brick_compiler::provider::Provider(compiler)),
+        Arc::new(brick_compiler_contract::Adapter::new(
+            brick_compiler::provider::Provider(compiler),
+        )),
         args.address,
     )
     .await?;

@@ -14,8 +14,7 @@ use std::{
 use tonic::Status;
 pub const SCHEMA: &str = include_str!("../../../interfaces/generate-bundle.brick.toml");
 // Accepted dependency revision; changing it is an explicit compatibility decision.
-pub const COMPILER_CONTRACT_ID: &str =
-    "deff59639a84888a8c1c8e493cac4f04b6236ffab3d43183ab75778f5d100215";
+pub const COMPILER_CONTRACT_ID: &str = brick_compiler_contract::CONTRACT_ID;
 
 pub struct Generator {
     compiler: Bundle,
@@ -64,55 +63,39 @@ impl Handler for Generator {
                         .code,
                 );
             }
-            let (_, pool) = compiler.validate().map_err(internal)?;
-            let request = message(
-                brick_contract::method(&pool, "Compile")
-                    .map_err(internal)?
-                    .input(),
-                &serde_json::json!({"schema":definition.schema}).to_string(),
-            )
-            .map_err(internal)?;
-            let response = brick_rpc::call(&compiler, address, "Compile", &request)
+            compiler.validate().map_err(internal)?;
+            let mut client = brick_compiler_contract::Client::connect(address)
                 .await
                 .map_err(internal)?;
-            if response.has_field_by_name("rejection") {
-                let json = serde_json::to_value(&response).map_err(internal)?;
-                let code = json["rejection"]["code"]
-                    .as_str()
-                    .ok_or_else(|| Status::internal("invalid compiler rejection"))?;
-                if !matches!(code, "IMPORTS_FORBIDDEN" | "INVALID_SCHEMA") {
-                    return Err(Status::internal("unknown compiler rejection"));
+            let response = client
+                .compile(brick_compiler_contract::CompileRequest {
+                    schema: definition.schema.clone(),
+                })
+                .await?;
+            let compiled = match response.outcome {
+                Some(brick_compiler_contract::compile_response::Outcome::Rejection(error)) => {
+                    if !matches!(error.code.as_str(), "IMPORTS_FORBIDDEN" | "INVALID_SCHEMA") {
+                        return Err(Status::internal("unknown compiler rejection"));
+                    }
+                    return reject(&error.code);
                 }
-                return reject(code);
-            }
-            if !response.has_field_by_name("compiled") {
-                return Err(Status::internal("missing compiler outcome"));
-            }
-            let field = response
-                .get_field_by_name("compiled")
-                .ok_or_else(|| Status::internal("compiled field"))?;
-            let compiled = field
-                .as_message()
-                .ok_or_else(|| Status::internal("compiled message"))?;
-            let json = serde_json::to_value(compiled).map_err(internal)?;
-            if json["schemaDigest"] != hash(definition.schema.as_bytes()) {
+                Some(brick_compiler_contract::compile_response::Outcome::Compiled(compiled)) => {
+                    compiled
+                }
+                None => return Err(Status::internal("missing compiler outcome")),
+            };
+            if compiled.schema_digest != hash(definition.schema.as_bytes()) {
                 return Err(Status::internal(
                     "compiler returned different schema identity",
                 ));
             }
-            let descriptor = compiled
-                .get_field_by_name("descriptor")
-                .and_then(|v| v.as_bytes().map(|b| b.to_vec()))
-                .ok_or_else(|| Status::internal("descriptor bytes"))?;
+            let descriptor = compiled.descriptor;
+            let identity = compiled
+                .compiler
+                .ok_or_else(|| Status::internal("missing compiler identity"))?;
             let identity = brick_contract::CompilerIdentity {
-                version: json["compiler"]["version"]
-                    .as_str()
-                    .ok_or_else(|| Status::internal("compiler version"))?
-                    .into(),
-                executable_digest: json["compiler"]["executableDigest"]
-                    .as_str()
-                    .ok_or_else(|| Status::internal("compiler digest"))?
-                    .into(),
+                version: identity.version,
+                executable_digest: identity.executable_digest,
             };
             if identity.executable_digest.len() != 64
                 || !identity

@@ -1,0 +1,22 @@
+[package]
+name = "brick-compiler-contract"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+[dependencies]
+brick-rpc = { path = "../../crates/brick-rpc" }
+anyhow.workspace = true
+prost.workspace = true
+prost-reflect.workspace = true
+tonic.workspace = true
+tonic-prost.workspace = true
+[build-dependencies]
+brick-build = { path = "../../crates/brick-build" }
+[lints]
+workspace = true
+
+[dev-dependencies]
+brick-contract = { path = "../../crates/brick-contract" }
+tokio.workspace = true
+serde_json.workspace = true

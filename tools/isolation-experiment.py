@@ -57,9 +57,9 @@ def measured(label, command, env=None):
             artifacts.append(item)
     if artifacts:
         phase['rebuilt_local_targets'] = sorted(set(a['target']['name'] for a in artifacts
-            if not a['fresh'] and '/crates/' in a['target']['src_path']))
-        phase['all_local_packages'] = sorted(set(a['package_id'].split('#')[0].split('/')[-1]
-            for a in artifacts if '/crates/' in a['target']['src_path']))
+            if not a['fresh'] and a['target']['src_path'].startswith(str(SOURCE))))
+        phase['all_local_packages'] = sorted(set(a['package_id'].split('#')[-1].split('@')[0] if '@' in a['package_id'].split('#')[-1] else a['package_id'].split('#')[0].split('/')[-1]
+            for a in artifacts if a['target']['src_path'].startswith(str(SOURCE))))
     RESULTS['phases'][label] = phase
     assert code == 0, stderr.read_text()[-4000:]
     return artifacts
@@ -122,7 +122,7 @@ def main():
     client = ROOT / 'target/debug/brick'
     assert client.exists(), 'Build brick-cli first (outside the measured experiment)'
     SOURCE.mkdir(parents=True)
-    for name in ['crates', 'interfaces', 'fixtures', '.cargo']:
+    for name in ['crates', 'contracts', 'interfaces', 'fixtures', '.cargo']:
         shutil.copytree(ROOT / name, SOURCE / name)
     for name in ['Cargo.toml', 'Cargo.lock']:
         shutil.copy2(ROOT / name, SOURCE / name)
@@ -139,8 +139,8 @@ def main():
     ct = RUN / 'compiler-target'
     artifacts = build('generator-cold', 'brick-generator', gt, tests=True)
     packages = RESULTS['phases']['generator-cold']['all_local_packages']
-    assert set(packages) <= {'brick-generator', 'brick-contract', 'brick-rpc'}, packages
-    assert not list(gt.rglob('*brick_compiler*')), 'compiler implementation leaked into build'
+    assert set(packages) <= {'brick-generator', 'brick-contract', 'brick-rpc', 'brick-build', 'brick-compiler-contract'}, packages
+    assert not list(gt.glob('debug/deps/libbrick_compiler-*')), 'compiler implementation leaked into build'
     run_tests('generator-without-protoc', test_executables(artifacts))
     build('compiler-cold', 'brick-compiler', ct)
     # Two disjoint edits in the SAME copied codebase. No Git worktree per worker.

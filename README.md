@@ -8,6 +8,26 @@ This is a first working increment, not the complete framework. Runtime and provi
 this repository is Rust; the measurement harness is Python. `protoc` supplies the existing protobuf parser/compiler;
 tonic supplies gRPC and prost supplies protobuf encoding and bindings.
 
+## Create a Rust module
+
+```sh
+cargo build --locked -p brick-cli
+target/debug/brick new module hello --path .local/hello
+cd .local/hello
+cargo test
+```
+
+The scaffold creates a contract crate, an authored implementation crate, and a test
+that calls both the real implementation and a generated shadow through one typed
+client. `contract/build.rs` calls the `brick-build` library to validate the standalone
+contract and generate typed Rust APIs. Ordinary Cargo builds invoke neither protoc
+nor services; the descriptor is captured during scaffolding. An outdated descriptor
+or wrong provider method signature fails the build.
+
+The first Cargo invocation creates the new workspace's lockfile; commit it and use
+`--locked` thereafter. Current scaffolds use explicit local paths to this Brick
+checkout (`--brick-root` overrides it); these packages are not published yet.
+
 ## Start
 
 Requires Rust 1.88 or newer and `protoc` on PATH. Dependencies are pinned and the
@@ -64,8 +84,9 @@ verification fail.
 
 The bundle contains the original definition, descriptor, generated Rust **message**
 bindings, compiler/generator identities, and a digest over those contents. Serving
-loads the descriptor directly. Typed provider/client code generation is not yet
-implemented; the dynamic client and server already use the same wire contract.
+loads the descriptor directly. The `brick-build` library generates typed clients, provider traits, and host adapters
+from those descriptors. Brick's compiler boundary and newly scaffolded modules use
+these types; the older meta-service entrypoints retain dynamic adapters.
 
 ## Generate Brick through Brick
 
@@ -164,6 +185,8 @@ acceptance tests, identity rules, and measurement limits.
 | --- | --- |
 | `brick-contract` | Definition/artifact data, validation, identities, atomic publication |
 | `brick-rpc` | Generic descriptor transport and finite shadow host |
+| `brick-build` | Build-time contract validation and typed Rust adapter generation |
+| `brick-compiler-contract` | Typed compiler boundary, without its implementation |
 | `brick-generator` | Generation algorithm and independently runnable provider |
 | `brick-compiler` | Independently runnable protoc adapter and process lifecycle |
 | `brick-seed` | Explicit bootstrap bridge composing compiler and generator |
@@ -183,7 +206,7 @@ A bundle digest is an integrity/content identity, not a signature
 or proof that its author is trustworthy.
 
 This increment does **not** implement arbitrary real-provider loading, multi-component
-graph wiring, generated typed service traits, behavioral-language proofs, stateful
+graph wiring, behavioral-language proofs, stateful
 failure scripts, virtual time, an OS sandbox, scheduler fairness, or a distributed
 cache. Loopback binding and a clean compiler environment do not establish a network
 sandbox. It has no production deployment surface.

@@ -1,3 +1,4 @@
+mod scaffold;
 use anyhow::{Result, ensure};
 use brick_runtime::Mode;
 use clap::{Parser, Subcommand, ValueEnum};
@@ -16,6 +17,11 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Commands {
+    /// Bootstrap a Rust component workspace.
+    New {
+        #[command(subcommand)]
+        kind: NewKind,
+    },
     /// Validate a standalone definition and all declared examples.
     Check { definition: PathBuf },
     /// Generate a self-contained descriptor/bindings bundle. Never overwrites files.
@@ -57,6 +63,18 @@ enum Commands {
     },
 }
 
+#[derive(Subcommand)]
+enum NewKind {
+    Module {
+        name: String,
+        #[arg(long)]
+        path: Option<PathBuf>,
+        /// Local Brick source checkout (bootstrap packages are not published yet).
+        #[arg(long)]
+        brick_root: Option<PathBuf>,
+    },
+}
+
 #[derive(Clone, Copy, ValueEnum)]
 enum Provider {
     Shadow,
@@ -86,6 +104,20 @@ async fn main() -> std::process::ExitCode {
 
 async fn run() -> Result<()> {
     match Cli::parse().command {
+        Commands::New {
+            kind:
+                NewKind::Module {
+                    name,
+                    path,
+                    brick_root,
+                },
+        } => {
+            let path = path.unwrap_or_else(|| PathBuf::from(&name));
+            let root = brick_root
+                .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../.."));
+            scaffold::module(&name, &path, &root)?;
+            println!("Created {}. Run cargo test inside it.", path.display());
+        }
         Commands::Check { definition } => {
             let bundle = brick_seed::build(&std::fs::read_to_string(definition)?)?;
             println!(

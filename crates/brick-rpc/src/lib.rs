@@ -34,6 +34,10 @@ const LIMIT: usize = 1024 * 1024;
 const REVISION: &str = "brick-contract-id";
 pub type Reply = Pin<Box<dyn Future<Output = Result<DynamicMessage, Status>> + Send>>;
 pub trait Handler: Send + Sync + 'static {
+    /// A typed provider must not advertise a revision different from its compiled contract.
+    fn contract_id(&self) -> Option<&str> {
+        None
+    }
     fn call(
         &self,
         method: MethodDescriptor,
@@ -167,6 +171,10 @@ pub async fn start(
 ) -> Result<Running> {
     ensure!(address.ip().is_loopback(), "loopback only");
     let (_, pool) = bundle.validate()?;
+    let id = contract_id(&bundle.source)?;
+    if let Some(expected) = handler.contract_id() {
+        ensure!(expected == id, "provider contract mismatch");
+    }
     let state = Arc::new(State {
         pool,
         id: contract_id(&bundle.source)?,

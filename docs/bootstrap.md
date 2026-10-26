@@ -49,8 +49,10 @@ bundle ceiling and is an explicit bootstrap transport limit.
   with an explicit pinned dependency. See [component isolation](component-isolation.md).
   The old mode dispatch remains a bootstrap compatibility path. Extend this pattern
   only when another component needs the same independence.
-- Add explicit project graph wiring, provider selection, typed generated clients
-  and provider traits, and stateful scenario support as independent increments.
+- Typed compiler clients/provider traits and `brick new module` now use the
+  `brick-build` library through ordinary build.rs hooks. Apply this pattern to
+  additional boundaries as needed; avoid a new orchestration or manifest system.
+- Add stateful scenario support only when a real component needs it.
 - Use those components to generate and verify Brick itself. Reduce the seed to
   loading versioned artifacts, launching providers, and bootstrapping the graph.
 - Add resource admission, cache ownership, and host isolation as explicit policies
