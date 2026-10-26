@@ -1,0 +1,14 @@
+format_version = 1
+schema = '''
+syntax = "proto3";
+package example.echo.v1;
+service Echo { rpc Say(Request) returns (Reply); }
+message Request { string text = 1; }
+message Reply { string text = 1; }
+'''
+
+[[cases]]
+name = "declared example"
+method = "Say"
+request_json = '{"text":"hello"}'
+response_json = '{"text":"hello from a generated shadow"}'
