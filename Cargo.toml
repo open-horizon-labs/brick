@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/brick-contract", "crates/brick-runtime", "crates/brick-cli"]
+members = ["crates/brick-contract", "crates/brick-runtime", "crates/brick-cli", "crates/brick-compiler", "crates/brick-generator", "crates/brick-seed", "crates/brick-rpc"]
 resolver = "3"
 
 [workspace.package]

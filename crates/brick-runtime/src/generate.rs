@@ -1,8 +1,9 @@
 //! Real generation adapter. Artifact semantics live in the standalone contract;
 //! the seed kernel remains the implementation until later bootstrap migrations.
-use anyhow::{Context, Result, ensure};
-use brick_contract::{Bundle, Compiler, message};
-use prost_reflect::{DynamicMessage, MessageDescriptor, Value};
+use anyhow::{Result, ensure};
+use brick_contract::{Bundle, message};
+use brick_seed::Compiler;
+use prost_reflect::{DynamicMessage, MessageDescriptor};
 use std::{net::SocketAddr, sync::atomic::AtomicBool};
 
 pub const SCHEMA: &str = include_str!("../../../interfaces/generate-bundle.brick.toml");
@@ -16,7 +17,7 @@ pub fn invoke(
     if brick_contract::parse(source).is_err() {
         return rejection(output, "INVALID_DEFINITION");
     }
-    match brick_contract::build_with_compiler(source, compiler, cancel) {
+    match brick_seed::build_with_compiler(source, compiler, cancel) {
         Ok(bundle) => encode(output, &bundle),
         Err(error) => match error.downcast_ref::<brick_contract::SchemaRejection>() {
             Some(error) => rejection(output, error.code),
@@ -32,19 +33,7 @@ fn rejection(output: MessageDescriptor, code: &str) -> Result<DynamicMessage> {
     )
 }
 
-pub(crate) fn encode(output: MessageDescriptor, bundle: &Bundle) -> Result<DynamicMessage> {
-    let mut json = serde_json::to_value(bundle)?;
-    json.as_object_mut()
-        .context("bundle object")?
-        .remove("descriptor");
-    let mut response = message(output, &serde_json::json!({"bundle": json}).to_string())?;
-    if let Some(Value::Message(value)) = response.get_field_by_name_mut("bundle") {
-        value.set_field_by_name("descriptor", Value::Bytes(bundle.descriptor.clone().into()));
-    } else {
-        anyhow::bail!("missing bundle output");
-    }
-    Ok(response)
-}
+pub(crate) use brick_contract::wire::{decode_bundle, encode_bundle as encode};
 
 /// Validate before publication, including exact correspondence to the requested source.
 pub fn decode(response: &DynamicMessage, source: &str) -> Result<Bundle> {
@@ -53,45 +42,6 @@ pub fn decode(response: &DynamicMessage, source: &str) -> Result<Bundle> {
         bundle.source == source,
         "generator returned bundle for different source"
     );
-    Ok(bundle)
-}
-
-pub(crate) fn decode_bundle(response: &DynamicMessage) -> Result<Bundle> {
-    ensure!(
-        response.has_field_by_name("bundle"),
-        "generation rejected: {}",
-        serde_json::to_string(response)?
-    );
-    let field = response
-        .get_field_by_name("bundle")
-        .context("bundle field")?;
-    let value = field.as_message().context("bundle message")?;
-    let descriptor = value
-        .get_field_by_name("descriptor")
-        .context("descriptor field")?;
-    let descriptor = descriptor.as_bytes().context("descriptor bytes")?;
-    let mut json = serde_json::to_value(value)?;
-    json["descriptor"] = serde_json::to_value(descriptor.as_ref())?;
-    // Protobuf JSON omits empty maps; bundle JSON requires this field.
-    if json.get("rustBindings").is_none() {
-        json["rustBindings"] = serde_json::json!({});
-    }
-    let object = json.as_object_mut().context("bundle object")?;
-    for (wire, disk) in [
-        ("formatVersion", "format_version"),
-        ("rustBindings", "rust_bindings"),
-    ] {
-        if let Some(value) = object.remove(wire) {
-            object.insert(disk.into(), value);
-        }
-    }
-    if let Some(compiler) = object.get_mut("compiler").and_then(|v| v.as_object_mut())
-        && let Some(value) = compiler.remove("executableDigest")
-    {
-        compiler.insert("executable_digest".into(), value);
-    }
-    let bundle: Bundle = serde_json::from_value(json)?;
-    bundle.validate()?;
     Ok(bundle)
 }
 
@@ -122,7 +72,7 @@ mod tests {
 
     #[tokio::test]
     async fn generator_rejections_conform_as_shadow_and_real() {
-        let contract = brick_contract::build(SCHEMA).unwrap();
+        let contract = brick_seed::build(SCHEMA).unwrap();
         for mode in [Mode::Shadow, Mode::GenerateBundle] {
             let receipt = verify(&contract, mode).await.unwrap();
             assert!(receipt.passed, "{:?}", receipt.error);
@@ -132,7 +82,7 @@ mod tests {
 
     #[tokio::test]
     async fn generator_generates_itself_and_the_result_runs() {
-        let seed = brick_contract::build(SCHEMA).unwrap();
+        let seed = brick_seed::build(SCHEMA).unwrap();
         let mut server = start(&seed, Mode::GenerateBundle, "127.0.0.1:0".parse().unwrap())
             .await
             .unwrap();
@@ -158,7 +108,7 @@ mod tests {
 
     #[test]
     fn artifact_adapter_rejects_substitution_and_tampering() {
-        let seed = brick_contract::build(SCHEMA).unwrap();
+        let seed = brick_seed::build(SCHEMA).unwrap();
         let (_, pool) = seed.validate().unwrap();
         let output = brick_contract::method(&pool, "Generate").unwrap().output();
         let response = encode(output.clone(), &seed).unwrap();
@@ -175,14 +125,14 @@ mod tests {
 
     #[tokio::test]
     async fn invalid_cases_are_semantic_rejection_and_wrong_contract_is_refused() {
-        let seed = brick_contract::build(SCHEMA).unwrap();
+        let seed = brick_seed::build(SCHEMA).unwrap();
         let mut server = start(&seed, Mode::GenerateBundle, "127.0.0.1:0".parse().unwrap())
             .await
             .unwrap();
         let source = crate::SELF_SCHEMA.replace("method = \"Check\"", "method = \"Missing\"");
         let error = remote(&seed, server.address, &source).await.unwrap_err();
         assert!(error.to_string().contains("INVALID_CASES"));
-        let wrong = brick_contract::build(crate::SELF_SCHEMA).unwrap();
+        let wrong = brick_seed::build(crate::SELF_SCHEMA).unwrap();
         assert!(
             start(&wrong, Mode::GenerateBundle, "127.0.0.1:0".parse().unwrap())
                 .await

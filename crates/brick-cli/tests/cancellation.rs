@@ -42,7 +42,7 @@ fn cancellation(source: &str, mode: &str) {
 }
 
 fn cancellation_at(source: &str, mode: &str, during_discovery: bool) {
-    let bundle = brick_contract::build(source).unwrap();
+    let bundle = brick_seed::build(source).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let bundle_path = dir.path().join("bundle.json");
     brick_contract::publish(&bundle, &bundle_path).unwrap();

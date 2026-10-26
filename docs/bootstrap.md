@@ -45,9 +45,10 @@ bundle ceiling and is an explicit bootstrap transport limit.
 - RunScenarios is now independently defined and executable as shadow or real
   provider. Its real adapter owns isolated verification and returns checked receipts;
   the implementation still delegates to the seed verification engine.
-- Move provider implementations into independently buildable packages and express
-  their dependencies through explicit wiring; the current built-in mode dispatch
-  does not yet give each implementation an isolated compilation graph.
+- The generator and compiler now have independent packages and executable providers,
+  with an explicit pinned dependency. See [component isolation](component-isolation.md).
+  The old mode dispatch remains a bootstrap compatibility path. Extend this pattern
+  only when another component needs the same independence.
 - Add explicit project graph wiring, provider selection, typed generated clients
   and provider traits, and stateful scenario support as independent increments.
 - Use those components to generate and verify Brick itself. Reduce the seed to

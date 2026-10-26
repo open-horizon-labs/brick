@@ -1,0 +1,206 @@
+{
+  "scope": "one host, two build workers, synthetic source edits, no swarm throughput claim",
+  "cache_wrapper": "disabled for experiment",
+  "source_snapshot": "/Users/drazen/playground/brick/.local/isolation-817753a552/source",
+  "phases": {
+    "generator-cold": {
+      "elapsed_seconds": 52.808,
+      "exit_code": 0,
+      "time_reported_max_rss_bytes": 406781952,
+      "rebuilt_local_targets": [
+        "brick-generator",
+        "brick_contract",
+        "brick_generator",
+        "brick_rpc",
+        "isolation"
+      ],
+      "all_local_packages": [
+        "brick-contract",
+        "brick-generator",
+        "brick-rpc"
+      ]
+    },
+    "generator-without-protoc-0": {
+      "elapsed_seconds": 0.085,
+      "exit_code": 0,
+      "time_reported_max_rss_bytes": 12910592
+    },
+    "generator-without-protoc-1": {
+      "elapsed_seconds": 0.048,
+      "exit_code": 0,
+      "time_reported_max_rss_bytes": 1982464
+    },
+    "generator-without-protoc-2": {
+      "elapsed_seconds": 0.01,
+      "exit_code": 0,
+      "time_reported_max_rss_bytes": 1966080
+    },
+    "compiler-cold": {
+      "elapsed_seconds": 33.372,
+      "exit_code": 0,
+      "time_reported_max_rss_bytes": 426115072,
+      "rebuilt_local_targets": [
+        "brick-compiler",
+        "brick_compiler",
+        "brick_contract",
+        "brick_rpc"
+      ],
+      "all_local_packages": [
+        "brick-compiler",
+        "brick-contract",
+        "brick-rpc"
+      ]
+    },
+    "generator-existing-tests-during-compiler-build-0": {
+      "elapsed_seconds": 0.194,
+      "exit_code": 0,
+      "time_reported_max_rss_bytes": 12910592
+    },
+    "generator-existing-tests-during-compiler-build-1": {
+      "elapsed_seconds": 0.013,
+      "exit_code": 0,
+      "time_reported_max_rss_bytes": 1998848
+    },
+    "generator-existing-tests-during-compiler-build-2": {
+      "elapsed_seconds": 0.011,
+      "exit_code": 0,
+      "time_reported_max_rss_bytes": 1966080
+    },
+    "compiler-edit-concurrent": {
+      "elapsed_seconds": 1.385,
+      "exit_code": 0,
+      "time_reported_max_rss_bytes": 189087744,
+      "rebuilt_local_targets": [
+        "brick-compiler",
+        "brick_compiler"
+      ],
+      "all_local_packages": [
+        "brick-compiler",
+        "brick-contract",
+        "brick-rpc"
+      ]
+    },
+    "generator-edit-concurrent": {
+      "elapsed_seconds": 3.063,
+      "exit_code": 0,
+      "time_reported_max_rss_bytes": 230391808,
+      "rebuilt_local_targets": [
+        "brick-generator",
+        "brick_generator",
+        "isolation"
+      ],
+      "all_local_packages": [
+        "brick-contract",
+        "brick-generator",
+        "brick-rpc"
+      ]
+    },
+    "generator-verify-concurrent-0": {
+      "elapsed_seconds": 0.086,
+      "exit_code": 0,
+      "time_reported_max_rss_bytes": 13123584
+    },
+    "generator-verify-concurrent-1": {
+      "elapsed_seconds": 0.011,
+      "exit_code": 0,
+      "time_reported_max_rss_bytes": 1982464
+    },
+    "generator-verify-concurrent-2": {
+      "elapsed_seconds": 0.012,
+      "exit_code": 0,
+      "time_reported_max_rss_bytes": 1982464
+    },
+    "generator-after-compiler-edit": {
+      "elapsed_seconds": 0.248,
+      "exit_code": 0,
+      "time_reported_max_rss_bytes": 71188480,
+      "rebuilt_local_targets": [],
+      "all_local_packages": [
+        "brick-contract",
+        "brick-generator",
+        "brick-rpc"
+      ]
+    },
+    "compiler-only-edit": {
+      "elapsed_seconds": 1.033,
+      "exit_code": 0,
+      "time_reported_max_rss_bytes": 189087744,
+      "rebuilt_local_targets": [
+        "brick-compiler",
+        "brick_compiler"
+      ],
+      "all_local_packages": [
+        "brick-compiler",
+        "brick-contract",
+        "brick-rpc"
+      ]
+    },
+    "real-dependency-swap": {
+      "elapsed_seconds": 0.136,
+      "exit_code": 0,
+      "time_reported_max_rss_bytes": 11255808
+    },
+    "real-output-shadow-verification": {
+      "elapsed_seconds": 1.074,
+      "exit_code": 0,
+      "time_reported_max_rss_bytes": 40894464
+    }
+  },
+  "compiler_worker_active_after_existing_tests": true,
+  "real_artifact_digest": "395691e3961cec2dbd1fb4ca3afd84d85a50d66dac31ae6e1df77f9dc2d1417a",
+  "allocated_target_bytes": {
+    "generator": 427036672,
+    "compiler": 328626176
+  },
+  "limitation": "Separate targets duplicate dependency artifacts. RSS is time-reported per command, not simultaneous host peak. Source edits are synthetic comments; this proves invalidation scope, not productive 100-agent throughput.",
+  "date": "2026-10-26",
+  "source_base_commit": "32eeaf8; extraction was uncommitted during this measurement",
+  "provenance_capture": {
+    "timing": "post-run capture from retained snapshot and final build artifacts; not contemporaneously recorded",
+    "source_manifests": {
+      "initial": {
+        "manifest": "isolation-source-initial-2026-10-26.sha256",
+        "sha256": "5a7b3b68ca19b7910de39b1fd5e6268bfc9468f06469f7611b0767272853efd8",
+        "files": 39,
+        "capture": "Reconstructed post-run from retained final snapshot by removing the recorded synthetic appends."
+      },
+      "final": {
+        "manifest": "isolation-source-final-2026-10-26.sha256",
+        "sha256": "ad445d7c5b47bd56f6499da0961e5fcd58efc130817b26884c966e9d9661c985",
+        "files": 39,
+        "capture": "Hashed post-run from retained final source snapshot."
+      }
+    },
+    "synthetic_edit_sequence": [
+      {
+        "phase": "before concurrent builds",
+        "files": [
+          "crates/brick-generator/src/lib.rs",
+          "crates/brick-compiler/src/lib.rs"
+        ],
+        "append_utf8": "\n// Isolation experiment: independent implementation edit.\n"
+      },
+      {
+        "phase": "before compiler-only build",
+        "files": [
+          "crates/brick-compiler/src/lib.rs"
+        ],
+        "append_utf8": "\n// A second compiler-only change.\n"
+      }
+    ],
+    "script": {
+      "path": "tools/isolation-experiment.py",
+      "sha256_at_capture": "13662126ef4d5cf906c5110b32a21fc7020615c4cef17e96799f13a01dddb9ca",
+      "note": "Post-run script: strengthened service cleanup and added contemporaneous provenance recording for future runs. This hash does not identify execution-time script bytes."
+    },
+    "toolchain_at_capture": {
+      "rustc": "rustc 1.98.1 (48a229cea 2026-09-01)\nbinary: rustc\ncommit-hash: 48a229ceaefd4985c50990b14116b6d856af0985\ncommit-date: 2026-09-01\nhost: aarch64-apple-darwin\nrelease: 1.98.1\nLLVM version: 22.1.8\n",
+      "cargo": "cargo 1.98.1 (797e8a9bc 2026-08-05)\n"
+    },
+    "final_executable_sha256": {
+      "generator-target/brick-generator": "0bc437c0ca51f298f085a4a22eda04b3d63529234a6ebdcb9ef5142080e4a938",
+      "compiler-target/brick-compiler": "c34e434ddf92ef863dcdfbfe9a55c7384a313e19422d4fe4fce86777dfc6b9d2",
+      "generator-target/debug/deps/isolation-7620fa51374754b8": "7be35288471729d10349bd6287ec6bed949aa3bbf10856f43ce4f1725dcd9a1f"
+    }
+  }
+}

@@ -6,6 +6,8 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+brick-rpc = { path = "../brick-rpc" }
+brick-seed = { path = "../brick-seed" }
 brick-contract = { path = "../brick-contract" }
 anyhow.workspace = true
 axum.workspace = true

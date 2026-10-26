@@ -10,6 +10,7 @@ name = "brick"
 path = "src/main.rs"
 
 [dependencies]
+brick-seed = { path = "../brick-seed" }
 brick-contract = { path = "../brick-contract" }
 brick-runtime = { path = "../brick-runtime" }
 anyhow.workspace = true

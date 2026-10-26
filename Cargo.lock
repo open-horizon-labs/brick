@@ -170,10 +170,28 @@ dependencies = [
  "anyhow",
  "brick-contract",
  "brick-runtime",
+ "brick-seed",
  "clap",
  "serde_json",
  "tempfile",
  "tokio",
+]
+
+[[package]]
+name = "brick-compiler"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "brick-contract",
+ "brick-rpc",
+ "clap",
+ "prost",
+ "prost-reflect",
+ "prost-types",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tonic",
 ]
 
 [[package]]
@@ -182,7 +200,6 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "prost",
- "prost-build",
  "prost-reflect",
  "prost-types",
  "serde",
@@ -193,12 +210,51 @@ dependencies = [
 ]
 
 [[package]]
+name = "brick-generator"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "brick-contract",
+ "brick-rpc",
+ "clap",
+ "prost",
+ "prost-build",
+ "prost-reflect",
+ "prost-types",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "toml",
+ "tonic",
+]
+
+[[package]]
+name = "brick-rpc"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "axum",
+ "brick-contract",
+ "bytes",
+ "clap",
+ "prost",
+ "prost-reflect",
+ "serde_json",
+ "tokio",
+ "tokio-stream",
+ "tonic",
+ "tower",
+]
+
+[[package]]
 name = "brick-runtime"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "axum",
  "brick-contract",
+ "brick-rpc",
+ "brick-seed",
  "bytes",
  "prost",
  "prost-reflect",
@@ -208,6 +264,17 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tower",
+]
+
+[[package]]
+name = "brick-seed"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "brick-compiler",
+ "brick-contract",
+ "brick-generator",
+ "tempfile",
 ]
 
 [[package]]

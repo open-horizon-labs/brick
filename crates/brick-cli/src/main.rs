@@ -87,7 +87,7 @@ async fn main() -> std::process::ExitCode {
 async fn run() -> Result<()> {
     match Cli::parse().command {
         Commands::Check { definition } => {
-            let bundle = brick_contract::build(&std::fs::read_to_string(definition)?)?;
+            let bundle = brick_seed::build(&std::fs::read_to_string(definition)?)?;
             println!(
                 "{}",
                 serde_json::json!({"valid": true, "digest": bundle.digest})
@@ -107,7 +107,7 @@ async fn run() -> Result<()> {
                     _ = tokio::signal::ctrl_c() => anyhow::bail!("generation cancelled"),
                 }
             } else {
-                brick_contract::build(&source)?
+                brick_seed::build(&source)?
             };
             let output = output.unwrap_or_else(|| brick_contract::default_output(&bundle));
             brick_contract::publish(&bundle, &output)?;

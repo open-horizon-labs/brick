@@ -4,8 +4,8 @@ A Rust bootstrap for independently executable components, starting from standalo
 interfaces. Interface changes are explicit coordination points; implementation
 behind an accepted interface can proceed independently.
 
-This is a first working increment, not the complete framework. All Brick code in
-this repository is Rust. `protoc` supplies the existing protobuf parser/compiler;
+This is a first working increment, not the complete framework. Runtime and provider code in
+this repository is Rust; the measurement harness is Python. `protoc` supplies the existing protobuf parser/compiler;
 tonic supplies gRPC and prost supplies protobuf encoding and bindings.
 
 ## Start
@@ -150,13 +150,25 @@ binding generation. The scenario runner also uses the existing seed verification
 own interface. Runtime dispatch and all three algorithms remain seed code. Those are visible bootstrap responsibilities,
 not a claim of complete self-hosting. See [the bootstrap plan](docs/bootstrap.md).
 
-The crates have separate roles:
+## Independent generation and replaceable compilation
+
+The generator now has its own package and executable. Its build graph excludes the
+compiler implementation and the bootstrap runtime. It runs its actual generation
+algorithm against either a frozen compiler shadow or a real compiler endpoint,
+selected through an explicitly pinned standalone contract.
+
+See [the runnable isolation experiment](docs/component-isolation.md) for commands,
+acceptance tests, identity rules, and measurement limits.
 
 | Crate | Responsibility |
 | --- | --- |
-| `brick-contract` | Standalone definition validation, descriptors, generated bindings, atomic bundle publication |
-| `brick-runtime` | Descriptor-driven shadow serving, real provider adapters, gRPC calls, verification receipts |
-| `brick-cli` | Command parsing and lifecycle orchestration |
+| `brick-contract` | Definition/artifact data, validation, identities, atomic publication |
+| `brick-rpc` | Generic descriptor transport and finite shadow host |
+| `brick-generator` | Generation algorithm and independently runnable provider |
+| `brick-compiler` | Independently runnable protoc adapter and process lifecycle |
+| `brick-seed` | Explicit bootstrap bridge composing compiler and generator |
+| `brick-runtime` | Compatibility harness for built-in providers and scenario runner |
+| `brick-cli` | Bootstrap commands and remote generation/verification clients |
 
 ## Evidence and limits
 

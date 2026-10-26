@@ -1,0 +1,32 @@
+format_version = 1
+schema = '''
+syntax = "proto3";
+package brick.compiler.v1;
+// Compiles one standalone proto3 schema (<=256 KiB), exactly one package and
+// service, unary methods only. All schema imports are forbidden. Input is UTF-8.
+// Success returns a protobuf FileDescriptorSet for one file named interface.proto,
+// with no dependencies, matching the requested schema. Identity records the
+// actual compiler executable. No Rust code generation or published file IO.
+// Compiler/IO/timeout/cancellation failures are gRPC errors, not schema rejection.
+service Compiler { rpc Compile(CompileRequest) returns (CompileResponse); }
+message CompileRequest { string schema = 1; }
+message CompileResponse {
+  oneof outcome { Compiled compiled = 1; Rejection rejection = 2; }
+}
+message Compiled {
+  bytes descriptor = 1;
+  string schema_digest = 2; // Lowercase SHA-256 of exact request UTF-8 bytes.
+  CompilerIdentity compiler = 3;
+}
+message CompilerIdentity {
+  string version = 1;
+  string executable_digest = 2; // Lowercase SHA-256 of compiler executable bytes.
+}
+message Rejection { string code = 1; } // IMPORTS_FORBIDDEN or INVALID_SCHEMA.
+'''
+
+[[cases]]
+name = "imports rejected"
+method = "Compile"
+request_json = '{"schema":"import \"other.proto\";"}'
+response_json = '{"rejection":{"code":"IMPORTS_FORBIDDEN"}}'

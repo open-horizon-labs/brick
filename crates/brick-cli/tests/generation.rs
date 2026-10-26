@@ -2,7 +2,7 @@ use std::process::Command;
 
 #[tokio::test]
 async fn cli_generates_over_its_boundary_without_overwriting() {
-    let contract = brick_contract::build(brick_runtime::generate::SCHEMA).unwrap();
+    let contract = brick_seed::build(brick_runtime::generate::SCHEMA).unwrap();
     let mut server = brick_runtime::start(
         &contract,
         brick_runtime::Mode::GenerateBundle,
@@ -52,7 +52,7 @@ async fn cli_generates_over_its_boundary_without_overwriting() {
 
 #[tokio::test]
 async fn cli_verifies_via_runner_and_preserves_failure_exit_status() {
-    let contract = brick_contract::build(brick_runtime::scenarios::SCHEMA).unwrap();
+    let contract = brick_seed::build(brick_runtime::scenarios::SCHEMA).unwrap();
     let mut server = brick_runtime::start(
         &contract,
         brick_runtime::Mode::RunScenarios,
@@ -77,7 +77,7 @@ async fn cli_verifies_via_runner_and_preserves_failure_exit_status() {
                 false,
             ),
         ] {
-            let bundle = brick_contract::build(&source).unwrap();
+            let bundle = brick_seed::build(&source).unwrap();
             let path = dir.path().join(format!("{name}.json"));
             brick_contract::publish(&bundle, &path).unwrap();
             let result = Command::new(env!("CARGO_BIN_EXE_brick"))

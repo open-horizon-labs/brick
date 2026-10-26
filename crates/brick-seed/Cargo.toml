@@ -1,0 +1,16 @@
+[package]
+name = "brick-seed"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+brick-contract = { path = "../brick-contract" }
+brick-compiler = { path = "../brick-compiler" }
+brick-generator = { path = "../brick-generator" }
+anyhow.workspace = true
+tempfile.workspace = true
+
+[lints]
+workspace = true

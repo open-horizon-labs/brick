@@ -1,4 +1,3 @@
-mod codec;
 pub mod generate;
 pub mod scenarios;
 
@@ -7,9 +6,9 @@ use axum::{
     Router,
     http::{Request as HttpRequest, uri::PathAndQuery},
 };
-use brick_contract::{Bundle, Definition, message, method};
+use brick_contract::{Bundle, message, method};
+use brick_rpc::{Handler, RawCodec};
 use bytes::Bytes;
-use codec::RawCodec;
 use prost::Message;
 use prost_reflect::{DescriptorPool, DynamicMessage};
 use serde::{Deserialize, Serialize};
@@ -44,17 +43,16 @@ pub enum Mode {
 
 #[derive(Default)]
 struct Observations {
-    consumed: usize,
     violations: usize,
 }
 
 struct Runtime {
-    definition: Definition,
+    shadow: Option<brick_rpc::Shadow>,
     pool: DescriptorPool,
     mode: Mode,
     observations: Mutex<Observations>,
     compiler_slots: Arc<tokio::sync::Semaphore>,
-    compiler: Option<brick_contract::Compiler>,
+    compiler: Option<brick_seed::Compiler>,
     cancelled: Arc<AtomicBool>,
 }
 
@@ -68,31 +66,13 @@ impl Runtime {
             return Err(Status::invalid_argument("UNKNOWN_FIELDS"));
         }
         match self.mode {
-            Mode::Shadow => {
-                let mut state = self
-                    .observations
-                    .lock()
-                    .map_err(|_| Status::internal("state poisoned"))?;
-                let Some(case) = self.definition.cases.get(state.consumed) else {
-                    return Err(Status::unimplemented(
-                        "SHADOW_UNSPECIFIED: no remaining declared response",
-                    ));
-                };
-                let expected_method = method(&self.pool, &case.method).map_err(internal)?;
-                let expected =
-                    message(expected_method.input(), &case.request_json).map_err(internal)?;
-                if descriptor != expected_method
-                    || !same_message(&input, &expected).map_err(internal)?
-                {
-                    return Err(Status::failed_precondition(
-                        "UNEXPECTED_CALL: does not match next declared case",
-                    ));
-                }
-                let response =
-                    message(descriptor.output(), &case.response_json).map_err(internal)?;
-                state.consumed += 1;
-                Ok(response.encode_to_vec().into())
-            }
+            Mode::Shadow => self
+                .shadow
+                .as_ref()
+                .ok_or_else(|| Status::internal("missing shadow"))?
+                .call(descriptor, input, self.cancelled.clone())
+                .await
+                .map(|v| v.encode_to_vec().into()),
             Mode::RunScenarios => {
                 let permit = self
                     .compiler_slots
@@ -244,12 +224,8 @@ impl Running {
             "{} unexpected/exhausted calls",
             state.violations
         );
-        if self.runtime.mode == Mode::Shadow {
-            ensure!(
-                state.consumed == self.runtime.definition.cases.len(),
-                "unconsumed expectations: {}",
-                self.runtime.definition.cases.len() - state.consumed
-            );
+        if let Some(shadow) = &self.runtime.shadow {
+            shadow.complete()?;
         }
         Ok(())
     }
@@ -327,7 +303,7 @@ async fn start_controlled(
         let cancel = cancelled.clone();
         Some(
             tokio::task::spawn_blocking(move || {
-                brick_contract::Compiler::discover_with_cancel(&cancel)
+                brick_seed::Compiler::discover_with_cancel(&cancel)
             })
             .await??,
         )
@@ -335,7 +311,11 @@ async fn start_controlled(
         None
     };
     let runtime = Arc::new(Runtime {
-        definition,
+        shadow: if mode == Mode::Shadow {
+            Some(brick_rpc::Shadow::new(bundle)?)
+        } else {
+            None
+        },
         pool,
         mode,
         observations: Mutex::new(Observations::default()),
@@ -422,6 +402,10 @@ async fn call_with_timeout(
     .parse()?;
     let mut wire_request = Request::new(Bytes::from(request.encode_to_vec()));
     wire_request.set_timeout(timeout);
+    wire_request.metadata_mut().insert(
+        "brick-contract-id",
+        brick_contract::contract_id(&bundle.source)?.parse()?,
+    );
     let response: Response<Bytes> = client.unary(wire_request, path, RawCodec).await?;
     Ok(DynamicMessage::decode(
         descriptor.output(),
@@ -542,7 +526,7 @@ mod tests {
 
     #[tokio::test]
     async fn same_contract_runs_as_shadow_and_real_rust_checker() {
-        let bundle = brick_contract::build(SELF_SCHEMA).unwrap();
+        let bundle = brick_seed::build(SELF_SCHEMA).unwrap();
         for mode in [Mode::Shadow, Mode::InterfaceCheck] {
             let receipt = verify(&bundle, mode).await.unwrap();
             assert!(receipt.passed, "{:?}", receipt.error);
@@ -556,7 +540,7 @@ mod tests {
 
     #[tokio::test]
     async fn brick_checks_its_own_interface_through_its_real_boundary() {
-        let bundle = brick_contract::build(SELF_SCHEMA).unwrap();
+        let bundle = brick_seed::build(SELF_SCHEMA).unwrap();
         let mut running = start(
             &bundle,
             Mode::InterfaceCheck,
@@ -578,7 +562,7 @@ mod tests {
 
     #[tokio::test]
     async fn missing_unexpected_and_exhausted_calls_never_pass() {
-        let bundle = brick_contract::build(ECHO).unwrap();
+        let bundle = brick_seed::build(ECHO).unwrap();
         let mut server = start(&bundle, Mode::Shadow, "127.0.0.1:0".parse().unwrap())
             .await
             .unwrap();
@@ -608,7 +592,7 @@ mod tests {
             "response_json = '{\"valid\":false}'",
             1,
         );
-        let bundle = brick_contract::build(&altered).unwrap();
+        let bundle = brick_seed::build(&altered).unwrap();
         assert!(verify(&bundle, Mode::Shadow).await.unwrap().passed);
         let result = verify(&bundle, Mode::InterfaceCheck).await.unwrap();
         assert!(!result.passed);
@@ -617,7 +601,7 @@ mod tests {
 
     #[tokio::test]
     async fn dropping_a_run_cancels_listener_and_runs_have_private_state() {
-        let bundle = brick_contract::build(ECHO).unwrap();
+        let bundle = brick_seed::build(ECHO).unwrap();
         let a = start(&bundle, Mode::Shadow, "127.0.0.1:0".parse().unwrap())
             .await
             .unwrap();

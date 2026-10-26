@@ -1,5 +1,5 @@
-//! The bootstrap contract kernel. No transport or application implementation dependency.
-use anyhow::{Context, Result, bail, ensure};
+//! Standalone artifact data and validation. No compiler or provider implementation.
+use anyhow::{Context, Result, ensure};
 use prost::Message;
 use prost_reflect::{DescriptorPool, DynamicMessage, MethodDescriptor};
 use prost_types::FileDescriptorSet;
@@ -9,29 +9,14 @@ use std::{
     collections::BTreeMap,
     fs,
     path::{Path, PathBuf},
-    process::{Child, Command, Output, Stdio},
-    sync::atomic::{AtomicBool, Ordering},
-    thread,
-    time::{Duration, Instant},
 };
-
 pub const FORMAT: u32 = 1;
 pub const GENERATOR: &str = concat!("brick-seed/", env!("CARGO_PKG_VERSION"));
 pub const MAX_SOURCE_BYTES: usize = 256 * 1024;
-
-fn compiler_path() -> Result<PathBuf> {
-    std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())
-        .map(|path| path.join("protoc"))
-        .find(|path| path.is_file())
-        .context("protoc is required on PATH")?
-        .canonicalize()
-        .context("cannot resolve protoc")
-}
-
 #[derive(Debug)]
 pub struct SchemaRejection {
     pub code: &'static str,
-    detail: String,
+    pub detail: String,
 }
 impl std::fmt::Display for SchemaRejection {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -40,7 +25,7 @@ impl std::fmt::Display for SchemaRejection {
 }
 impl std::error::Error for SchemaRejection {}
 
-fn schema_input(schema: &str) -> Result<()> {
+pub fn schema_input(schema: &str) -> Result<()> {
     if schema.len() > MAX_SOURCE_BYTES {
         return Err(SchemaRejection {
             code: "INVALID_SCHEMA",
@@ -58,127 +43,11 @@ fn schema_input(schema: &str) -> Result<()> {
     Ok(())
 }
 
-struct ChildGuard(Child);
-impl Drop for ChildGuard {
-    fn drop(&mut self) {
-        let _ = self.0.kill();
-        let _ = self.0.wait();
-    }
-}
-
-fn bounded(mut command: Command, cancel: &AtomicBool, deadline: Duration) -> Result<Output> {
-    ensure!(!cancel.load(Ordering::Acquire), "compiler cancelled");
-    let output = tempfile::tempdir()?;
-    let stdout = output.path().join("stdout");
-    let stderr = output.path().join("stderr");
-    let mut child = ChildGuard(
-        command
-            .stdin(Stdio::null())
-            .stdout(fs::File::create(&stdout)?)
-            .stderr(fs::File::create(&stderr)?)
-            .spawn()
-            .context("could not start protoc")?,
-    );
-    let started = Instant::now();
-    let status = loop {
-        if let Some(status) = child.0.try_wait()? {
-            break status;
-        }
-        ensure!(!cancel.load(Ordering::Acquire), "compiler cancelled");
-        ensure!(started.elapsed() < deadline, "protoc exceeded deadline");
-        thread::sleep(Duration::from_millis(10));
-    };
-    Ok(Output {
-        status,
-        stdout: fs::read(stdout)?,
-        stderr: fs::read(stderr)?,
-    })
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CompilerIdentity {
     pub version: String,
     pub executable_digest: String,
-}
-
-#[derive(Clone)]
-pub struct Compiler {
-    path: PathBuf,
-    pub identity: CompilerIdentity,
-}
-
-impl Compiler {
-    pub fn discover() -> Result<Self> {
-        Self::discover_with_cancel(&AtomicBool::new(false))
-    }
-
-    pub fn discover_with_cancel(cancel: &AtomicBool) -> Result<Self> {
-        let path = compiler_path()?;
-        let executable_digest = hash(&fs::read(&path)?);
-        let mut command = Command::new(&path);
-        command.env_clear().arg("--version");
-        let version = bounded(command, cancel, Duration::from_secs(10))?;
-        ensure!(version.status.success(), "could not identify protoc");
-        Ok(Self {
-            path,
-            identity: CompilerIdentity {
-                version: String::from_utf8(version.stdout)?.trim().into(),
-                executable_digest,
-            },
-        })
-    }
-
-    pub fn compile(&self, schema: &str, cancel: &AtomicBool) -> Result<Vec<u8>> {
-        schema_input(schema)?;
-        ensure!(
-            hash(&fs::read(&self.path)?) == self.identity.executable_digest,
-            "compiler changed during run"
-        );
-        let dir = tempfile::tempdir()?;
-        fs::write(dir.path().join("interface.proto"), schema)?;
-        let mut command = Command::new(&self.path);
-        command.env_clear().current_dir(dir.path()).args([
-            "--proto_path=.",
-            "--descriptor_set_out=interface.pb",
-            "interface.proto",
-        ]);
-        let output = bounded(command, cancel, Duration::from_secs(10))?;
-        if !output.status.success() {
-            let diagnostics = String::from_utf8_lossy(&output.stderr);
-            // Source-located parser diagnostics are semantic rejection. Termination,
-            // output-file failures, and other compiler failures remain infrastructure errors.
-            if output.status.code() == Some(1)
-                && !diagnostics.trim().is_empty()
-                && diagnostics
-                    .lines()
-                    .all(|line| line.starts_with("interface.proto:"))
-            {
-                return Err(SchemaRejection {
-                    code: "INVALID_SCHEMA",
-                    detail: diagnostics.into(),
-                }
-                .into());
-            }
-            bail!(
-                "compiler execution failed ({}): {}",
-                output.status,
-                diagnostics
-            );
-        }
-        let bytes = fs::read(dir.path().join("interface.pb"))?;
-        FileDescriptorSet::decode(bytes.as_slice())
-            .context("compiler emitted invalid descriptor bytes")?;
-        validate_descriptor(&bytes).map_err(|error| SchemaRejection {
-            code: "INVALID_SCHEMA",
-            detail: error.to_string(),
-        })?;
-        ensure!(
-            hash(&fs::read(&self.path)?) == self.identity.executable_digest,
-            "compiler changed during run"
-        );
-        Ok(bytes)
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -217,7 +86,7 @@ pub fn hash(bytes: &[u8]) -> String {
 }
 
 impl Bundle {
-    fn identity(&self) -> Result<String> {
+    pub fn identity(&self) -> Result<String> {
         let mut unsigned = self.clone();
         unsigned.digest.clear();
         Ok(hash(&serde_json::to_vec(&unsigned)?))
@@ -292,11 +161,6 @@ pub fn has_import(schema: &str) -> bool {
     false
 }
 
-pub fn compile_schema(schema: &str) -> Result<Vec<u8>> {
-    schema_input(schema)?;
-    Compiler::discover()?.compile(schema, &AtomicBool::new(false))
-}
-
 pub fn validate_descriptor(bytes: &[u8]) -> Result<DescriptorPool> {
     let fds = FileDescriptorSet::decode(bytes)?;
     ensure!(
@@ -346,7 +210,7 @@ pub fn message(desc: prost_reflect::MessageDescriptor, json: &str) -> Result<Dyn
     Ok(value)
 }
 
-fn validate_cases(definition: &Definition, pool: &DescriptorPool) -> Result<()> {
+pub fn validate_cases(definition: &Definition, pool: &DescriptorPool) -> Result<()> {
     let mut names = std::collections::HashSet::new();
     for case in &definition.cases {
         ensure!(
@@ -360,55 +224,6 @@ fn validate_cases(definition: &Definition, pool: &DescriptorPool) -> Result<()> 
             .with_context(|| format!("{} response", case.name))?;
     }
     Ok(())
-}
-
-pub fn build(source: &str) -> Result<Bundle> {
-    let definition = parse(source)?;
-    schema_input(&definition.schema)?;
-    let compiler = Compiler::discover()?;
-    build_with_compiler(source, &compiler, &AtomicBool::new(false))
-}
-
-/// Generate with an explicitly pinned compiler and caller-owned cancellation.
-pub fn build_with_compiler(
-    source: &str,
-    compiler: &Compiler,
-    cancel: &AtomicBool,
-) -> Result<Bundle> {
-    ensure!(!cancel.load(Ordering::Acquire), "generation cancelled");
-    let definition = parse(source)?;
-    let descriptor = compiler.compile(&definition.schema, cancel)?;
-    let pool = validate_descriptor(&descriptor)?;
-    validate_cases(&definition, &pool).map_err(|error| SchemaRejection {
-        code: "INVALID_CASES",
-        detail: error.to_string(),
-    })?;
-    let dir = tempfile::tempdir()?;
-    prost_build::Config::new()
-        .out_dir(dir.path())
-        .compile_fds(FileDescriptorSet::decode(descriptor.as_slice())?)?;
-    let mut rust_bindings = BTreeMap::new();
-    for entry in fs::read_dir(dir.path())? {
-        let path = entry?.path();
-        let filename = path
-            .file_name()
-            .context("generated filename")?
-            .to_str()
-            .context("UTF-8 filename")?;
-        rust_bindings.insert(filename.to_owned(), fs::read_to_string(path)?);
-    }
-    let mut bundle = Bundle {
-        format_version: FORMAT,
-        generator: GENERATOR.into(),
-        compiler: compiler.identity.clone(),
-        source: source.into(),
-        descriptor,
-        rust_bindings,
-        digest: String::new(),
-    };
-    ensure!(!cancel.load(Ordering::Acquire), "generation cancelled");
-    bundle.digest = bundle.identity()?;
-    Ok(bundle)
 }
 
 /// Publish a single self-contained bundle without clobbering any existing path.
@@ -444,88 +259,13 @@ pub fn default_output(bundle: &Bundle) -> PathBuf {
     PathBuf::from(".brick").join(format!("{}.json", bundle.digest))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    const ECHO: &str = include_str!("../../../interfaces/echo.brick.toml");
-
-    #[test]
-    fn execution_failures_are_not_schema_rejections() {
-        let compiler = Compiler {
-            path: PathBuf::from("/definitely-missing-brick-compiler"),
-            identity: CompilerIdentity {
-                version: "missing".into(),
-                executable_digest: "missing".into(),
-            },
-        };
-        let schema = parse(ECHO).unwrap().schema;
-        let error = compiler
-            .compile(&schema, &AtomicBool::new(false))
-            .unwrap_err();
-        assert!(error.downcast_ref::<SchemaRejection>().is_none());
-        let compiler = Compiler::discover().unwrap();
-        let error = compiler
-            .compile("not protobuf", &AtomicBool::new(false))
-            .unwrap_err();
-        assert_eq!(
-            error.downcast_ref::<SchemaRejection>().unwrap().code,
-            "INVALID_SCHEMA"
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn subprocess_timeout_reaps_child() {
-        let mut command = Command::new("/bin/sleep");
-        command.arg("30");
-        let started = Instant::now();
-        let error =
-            bounded(command, &AtomicBool::new(false), Duration::from_millis(30)).unwrap_err();
-        assert!(error.to_string().contains("deadline"));
-        assert!(started.elapsed() < Duration::from_secs(2));
-    }
-
-    #[test]
-    fn imports_cannot_hide_behind_comments_or_whitespace() {
-        for source in [
-            "import \"x.proto\";",
-            "/* comment */ import public \"x\";",
-            "import\n\"x\";",
-        ] {
-            assert!(has_import(source));
-            assert!(
-                compile_schema(source)
-                    .unwrap_err()
-                    .to_string()
-                    .contains("IMPORTS_FORBIDDEN")
-            );
-        }
-        assert!(!has_import(
-            "// import x\nmessage Important { string import_name = 1; }"
-        ));
-        assert!(!has_import("option text = \"import x\"; /* import y */"));
-    }
-
-    #[test]
-    fn generation_is_deterministic_and_publishes_without_overwrite() {
-        let a = build(ECHO).unwrap();
-        let b = build(ECHO).unwrap();
-        assert_eq!(a.digest, b.digest);
-        assert!(!a.rust_bindings.is_empty());
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("bundle.json");
-        publish(&a, &path).unwrap();
-        assert!(publish(&b, &path).is_err());
-        assert_eq!(load(&path).unwrap().digest, a.digest);
-        let mut altered = a;
-        altered.source.push('\n');
-        assert!(altered.validate().is_err());
-    }
-
-    #[test]
-    fn invalid_scenarios_and_streams_are_rejected() {
-        assert!(build(&ECHO.replace("hello\"}", "hello\",\"extra\":true}")).is_err());
-        assert!(build(&ECHO.replace("rpc Say(Request)", "rpc Say(stream Request)")).is_err());
-        assert!(build(&ECHO.replace("method = \"Say\"", "method = \"Missing\"")).is_err());
-    }
+/// Exact authored schema identity, independent of tests, compiler and artifacts.
+pub fn contract_id(source: &str) -> Result<String> {
+    Ok(hash(parse(source)?.schema.as_bytes()))
 }
+/// Declared cases in order; separate from interface compatibility.
+pub fn scenario_id(source: &str) -> Result<String> {
+    Ok(hash(&serde_json::to_vec(&parse(source)?.cases)?))
+}
+
+pub mod wire;

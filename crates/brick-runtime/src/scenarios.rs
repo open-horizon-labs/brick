@@ -158,7 +158,7 @@ mod tests {
 
     #[tokio::test]
     async fn runner_shell_and_real_rejections_conform() {
-        let contract = brick_contract::build(SCHEMA).unwrap();
+        let contract = brick_seed::build(SCHEMA).unwrap();
         for mode in [Mode::Shadow, Mode::RunScenarios] {
             let receipt = verify(&contract, mode).await.unwrap();
             assert!(receipt.passed, "{:?}", receipt.error);
@@ -167,7 +167,7 @@ mod tests {
 
     #[tokio::test]
     async fn runner_returns_real_success_failure_and_rejects_bad_requests() {
-        let contract = brick_contract::build(SCHEMA).unwrap();
+        let contract = brick_seed::build(SCHEMA).unwrap();
         let mut server = start(
             &contract,
             Mode::RunScenarios,
@@ -175,7 +175,7 @@ mod tests {
         )
         .await
         .unwrap();
-        let checker = brick_contract::build(crate::SELF_SCHEMA).unwrap();
+        let checker = brick_seed::build(crate::SELF_SCHEMA).unwrap();
         for mode in [Mode::Shadow, Mode::InterfaceCheck] {
             let receipt = remote(&contract, server.address, &checker, mode)
                 .await
@@ -186,7 +186,7 @@ mod tests {
             wrong.bundle_digest = "wrong".into();
             assert!(validate_receipt(&wrong, &checker, mode).is_err());
         }
-        let bad = brick_contract::build(&crate::SELF_SCHEMA.replacen(
+        let bad = brick_seed::build(&crate::SELF_SCHEMA.replacen(
             "response_json = '{\"valid\":true}'",
             "response_json = '{\"valid\":false}'",
             1,
@@ -208,7 +208,7 @@ mod tests {
         let mut empty = brick_contract::parse(crate::SELF_SCHEMA).unwrap();
         empty.cases.clear();
         // Build empty definition without adding a TOML serialization dependency.
-        let empty = brick_contract::build(&format!(
+        let empty = brick_seed::build(&format!(
             "format_version = 1\nschema = '''{}'''",
             empty.schema
         ))
@@ -225,7 +225,7 @@ mod tests {
 
     #[tokio::test]
     async fn generated_runner_executes_generated_checker() {
-        let generator = brick_contract::build(generate::SCHEMA).unwrap();
+        let generator = brick_seed::build(generate::SCHEMA).unwrap();
         let mut generating = start(
             &generator,
             Mode::GenerateBundle,
@@ -253,8 +253,8 @@ mod tests {
     }
     #[tokio::test]
     async fn busy_runner_rejects_overlap_and_shutdown_joins_owned_run() {
-        let contract = brick_contract::build(SCHEMA).unwrap();
-        let checker = brick_contract::build(crate::SELF_SCHEMA).unwrap();
+        let contract = brick_seed::build(SCHEMA).unwrap();
+        let checker = brick_seed::build(crate::SELF_SCHEMA).unwrap();
         let mut server = start(
             &contract,
             Mode::RunScenarios,
@@ -296,7 +296,7 @@ mod tests {
 
     #[tokio::test]
     async fn execution_deadline_returns_failed_receipt_after_cleanup() {
-        let checker = brick_contract::build(crate::SELF_SCHEMA).unwrap();
+        let checker = brick_seed::build(crate::SELF_SCHEMA).unwrap();
         let receipt = crate::verify_controlled(
             &checker,
             Mode::InterfaceCheck,
