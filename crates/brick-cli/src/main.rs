@@ -41,6 +41,10 @@ enum Commands {
     /// Verify declared examples over a private gRPC server; print a JSON receipt.
     Verify {
         bundle: PathBuf,
+        #[arg(long, requires = "contract")]
+        via: Option<SocketAddr>,
+        #[arg(long, requires = "via")]
+        contract: Option<PathBuf>,
         #[arg(long, value_enum, default_value = "shadow")]
         mode: Provider,
     },
@@ -58,6 +62,7 @@ enum Provider {
     Shadow,
     InterfaceCheck,
     GenerateBundle,
+    RunScenarios,
 }
 impl From<Provider> for Mode {
     fn from(value: Provider) -> Self {
@@ -65,6 +70,7 @@ impl From<Provider> for Mode {
             Provider::Shadow => Self::Shadow,
             Provider::InterfaceCheck => Self::InterfaceCheck,
             Provider::GenerateBundle => Self::GenerateBundle,
+            Provider::RunScenarios => Self::RunScenarios,
         }
     }
 }
@@ -121,10 +127,24 @@ async fn run() -> Result<()> {
             tokio::signal::ctrl_c().await?;
             server.shutdown().await?;
         }
-        Commands::Verify { bundle, mode } => {
+        Commands::Verify {
+            bundle,
+            mode,
+            via,
+            contract,
+        } => {
             let bundle = brick_contract::load(&bundle)?;
+            let operation = async {
+                if let Some(address) = via {
+                    let contract =
+                        brick_contract::load(&contract.expect("clap requires contract"))?;
+                    brick_runtime::scenarios::remote(&contract, address, &bundle, mode.into()).await
+                } else {
+                    brick_runtime::verify(&bundle, mode.into()).await
+                }
+            };
             let receipt = tokio::select! {
-                result = brick_runtime::verify(&bundle, mode.into()) => result?,
+                result = operation => result?,
                 _ = tokio::signal::ctrl_c() => anyhow::bail!("verification cancelled"),
             };
             println!("{}", serde_json::to_string_pretty(&receipt)?);

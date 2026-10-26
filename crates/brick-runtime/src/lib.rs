@@ -1,5 +1,6 @@
 mod codec;
 pub mod generate;
+pub mod scenarios;
 
 use anyhow::{Context, Result, ensure};
 use axum::{
@@ -38,6 +39,7 @@ pub enum Mode {
     Shadow,
     InterfaceCheck,
     GenerateBundle,
+    RunScenarios,
 }
 
 #[derive(Default)]
@@ -89,6 +91,23 @@ impl Runtime {
                 let response =
                     message(descriptor.output(), &case.response_json).map_err(internal)?;
                 state.consumed += 1;
+                Ok(response.encode_to_vec().into())
+            }
+            Mode::RunScenarios => {
+                let permit = self
+                    .compiler_slots
+                    .clone()
+                    .try_acquire_owned()
+                    .map_err(|_| Status::resource_exhausted("RUNNER_BUSY"))?;
+                let cancel = self.cancelled.clone();
+                let output = descriptor.output();
+                // The supervisor owns admission through cleanup even if the RPC is dropped.
+                let response = tokio::spawn(async move {
+                    let _permit = permit;
+                    scenarios::invoke(input, output, cancel).await
+                })
+                .await
+                .map_err(internal)??;
                 Ok(response.encode_to_vec().into())
             }
             Mode::GenerateBundle => {
@@ -241,6 +260,15 @@ impl Running {
         if let Some(stop) = self.stop.take() {
             let _ = stop.send(());
         }
+        if self.runtime.mode == Mode::RunScenarios {
+            tokio::time::timeout(Duration::from_secs(6), async {
+                while self.runtime.compiler_slots.available_permits() == 0 {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .context("owned scenario did not stop")?;
+        }
         match tokio::time::timeout(Duration::from_secs(2), &mut self.task).await {
             Ok(result) => {
                 result??;
@@ -262,6 +290,16 @@ impl Running {
 }
 
 pub async fn start(bundle: &Bundle, mode: Mode, address: SocketAddr) -> Result<Running> {
+    start_controlled(bundle, mode, address, Arc::new(AtomicBool::new(false))).await
+}
+
+async fn start_controlled(
+    bundle: &Bundle,
+    mode: Mode,
+    address: SocketAddr,
+    cancelled: Arc<AtomicBool>,
+) -> Result<Running> {
+    ensure!(!cancelled.load(Ordering::Acquire), "run cancelled");
     ensure!(
         address.ip().is_loopback(),
         "bootstrap services bind to loopback only"
@@ -279,8 +317,20 @@ pub async fn start(bundle: &Bundle, mode: Mode, address: SocketAddr) -> Result<R
             "real generator requires Brick's exact GenerateBundle contract"
         );
     }
-    let compiler = if mode != Mode::Shadow {
-        Some(tokio::task::spawn_blocking(brick_contract::Compiler::discover).await??)
+    if mode == Mode::RunScenarios {
+        ensure!(
+            definition.schema == brick_contract::parse(scenarios::SCHEMA)?.schema,
+            "real runner requires Brick's exact RunScenarios contract"
+        );
+    }
+    let compiler = if matches!(mode, Mode::InterfaceCheck | Mode::GenerateBundle) {
+        let cancel = cancelled.clone();
+        Some(
+            tokio::task::spawn_blocking(move || {
+                brick_contract::Compiler::discover_with_cancel(&cancel)
+            })
+            .await??,
+        )
     } else {
         None
     };
@@ -291,7 +341,7 @@ pub async fn start(bundle: &Bundle, mode: Mode, address: SocketAddr) -> Result<R
         observations: Mutex::new(Observations::default()),
         compiler_slots: Arc::new(tokio::sync::Semaphore::new(1)),
         compiler,
-        cancelled: Arc::new(AtomicBool::new(false)),
+        cancelled,
     });
     let listener = TcpListener::bind(address).await?;
     let address = listener.local_addr()?;
@@ -335,12 +385,29 @@ pub async fn call(
     method_name: &str,
     request_json: &str,
 ) -> Result<DynamicMessage> {
+    call_with_timeout(
+        bundle,
+        address,
+        method_name,
+        request_json,
+        Duration::from_secs(15),
+    )
+    .await
+}
+
+async fn call_with_timeout(
+    bundle: &Bundle,
+    address: SocketAddr,
+    method_name: &str,
+    request_json: &str,
+    timeout: Duration,
+) -> Result<DynamicMessage> {
     let (_, pool) = bundle.validate()?;
     let descriptor = method(&pool, method_name)?;
     let request = message(descriptor.input(), request_json)?;
     let channel = Channel::from_shared(format!("http://{address}"))?
         .connect_timeout(Duration::from_secs(2))
-        .timeout(Duration::from_secs(15))
+        .timeout(timeout)
         .connect()
         .await?;
     let mut client = tonic::client::Grpc::new(channel)
@@ -354,7 +421,7 @@ pub async fn call(
     )
     .parse()?;
     let mut wire_request = Request::new(Bytes::from(request.encode_to_vec()));
-    wire_request.set_timeout(Duration::from_secs(15));
+    wire_request.set_timeout(timeout);
     let response: Response<Bytes> = client.unary(wire_request, path, RawCodec).await?;
     Ok(DynamicMessage::decode(
         descriptor.output(),
@@ -362,7 +429,7 @@ pub async fn call(
     )?)
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Receipt {
     pub evidence: String,
     pub bundle_digest: String,
@@ -379,54 +446,92 @@ pub struct Receipt {
 
 /// Executes declared cases over actual loopback gRPC. Shadow mode proves wiring only.
 pub async fn verify(bundle: &Bundle, mode: Mode) -> Result<Receipt> {
-    let started = Instant::now();
-    let (definition, pool) = bundle.validate()?;
-    ensure!(
-        !definition.cases.is_empty(),
-        "verification requires at least one declared case"
-    );
-    let mut running = start(bundle, mode, "127.0.0.1:0".parse()?).await?;
-    let mut count = 0;
-    let outcome: Result<()> = async {
-        for case in &definition.cases {
-            let descriptor = method(&pool, &case.method)?;
-            let expected = message(descriptor.output(), &case.response_json)?;
-            let actual = call(bundle, running.address, &case.method, &case.request_json)
-                .await
-                .with_context(|| case.name.clone())?;
-            ensure!(
-                same_message(&actual, &expected)?,
-                "{}: response differs from declared expectation",
-                case.name
-            );
-            count += 1;
-        }
-        running.assert_complete()
+    verify_controlled(bundle, mode, Arc::new(AtomicBool::new(false)), None).await
+}
+
+struct CancelOnDrop(Arc<AtomicBool>);
+impl Drop for CancelOnDrop {
+    fn drop(&mut self) {
+        self.0.store(true, Ordering::Release);
     }
-    .await;
-    running.shutdown().await?;
-    let executable_digest = brick_contract::hash(&std::fs::read(std::env::current_exe()?)?);
-    Ok(Receipt {
-        evidence: if mode == Mode::Shadow {
-            "shadow_wiring_verified"
-        } else {
-            "component_contract_verified"
-        }
-        .into(),
-        bundle_digest: bundle.digest.clone(),
-        executable_digest,
-        runtime_compiler: running
-            .runtime
-            .compiler
-            .as_ref()
-            .map(|c| c.identity.clone()),
-        mode,
-        passed: outcome.is_ok(),
-        cases_passed: count,
-        elapsed_ms: started.elapsed().as_millis(),
-        cleanup: "server_stopped".into(),
-        network_sandbox: "not_enforced".into(),
-        error: outcome.err().map(|e| format!("{e:#}")),
+}
+async fn wait_cancel(cancel: &AtomicBool) {
+    while !cancel.load(Ordering::Acquire) {
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+}
+
+fn verify_controlled<'a>(
+    bundle: &'a Bundle,
+    mode: Mode,
+    cancel: Arc<AtomicBool>,
+    budget: Option<Duration>,
+) -> Pin<Box<dyn Future<Output = Result<Receipt>> + Send + 'a>> {
+    Box::pin(async move {
+        let started = Instant::now();
+        let (definition, pool) = bundle.validate()?;
+        ensure!(
+            !definition.cases.is_empty(),
+            "verification requires at least one declared case"
+        );
+        let local_cancel = Arc::new(AtomicBool::new(false));
+        let _cancel_on_drop = CancelOnDrop(local_cancel.clone());
+        let startup = start_controlled(bundle, mode, "127.0.0.1:0".parse()?, local_cancel.clone());
+        tokio::pin!(startup);
+        let mut running = tokio::select! {
+            result = &mut startup => result?,
+            _ = wait_cancel(&cancel) => {
+                local_cancel.store(true, Ordering::Release);
+                let _ = startup.await;
+                anyhow::bail!("run cancelled during startup");
+            }
+        };
+        let mut count = 0;
+        let execution = async {
+            for case in &definition.cases {
+                let descriptor = method(&pool, &case.method)?;
+                let expected = message(descriptor.output(), &case.response_json)?;
+                let actual = call(bundle, running.address, &case.method, &case.request_json)
+                    .await
+                    .with_context(|| case.name.clone())?;
+                ensure!(
+                    same_message(&actual, &expected)?,
+                    "{}: response differs from declared expectation",
+                    case.name
+                );
+                count += 1;
+            }
+            running.assert_complete()
+        };
+        let outcome: Result<()> = tokio::select! {
+            result = execution => result,
+            _ = wait_cancel(&cancel) => Err(anyhow::anyhow!("run cancelled")),
+            _ = async { if let Some(budget) = budget { tokio::time::sleep(budget).await } else { std::future::pending::<()>().await } } => Err(anyhow::anyhow!("scenario deadline exceeded")),
+        };
+        running.shutdown().await?;
+        let executable_digest = brick_contract::hash(&std::fs::read(std::env::current_exe()?)?);
+        Ok(Receipt {
+            evidence: if mode == Mode::Shadow {
+                "shadow_wiring_verified"
+            } else {
+                "component_contract_verified"
+            }
+            .into(),
+            bundle_digest: bundle.digest.clone(),
+            executable_digest,
+            runtime_compiler: running
+                .runtime
+                .compiler
+                .as_ref()
+                .map(|c| c.identity.clone()),
+            mode,
+            passed: outcome.is_ok(),
+            cases_passed: count,
+            elapsed_ms: started.elapsed().as_millis(),
+            cleanup: "server_stopped".into(),
+            network_sandbox: "not_enforced".into(),
+            error: outcome.err().map(|e| format!("{e:#}")),
+        })
     })
 }
 

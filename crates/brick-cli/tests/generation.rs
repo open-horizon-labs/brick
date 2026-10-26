@@ -49,3 +49,57 @@ async fn cli_generates_over_its_boundary_without_overwriting() {
     .unwrap();
     server.shutdown().await.unwrap();
 }
+
+#[tokio::test]
+async fn cli_verifies_via_runner_and_preserves_failure_exit_status() {
+    let contract = brick_contract::build(brick_runtime::scenarios::SCHEMA).unwrap();
+    let mut server = brick_runtime::start(
+        &contract,
+        brick_runtime::Mode::RunScenarios,
+        "127.0.0.1:0".parse().unwrap(),
+    )
+    .await
+    .unwrap();
+    let address = server.address;
+    tokio::task::spawn_blocking(move || {
+        let dir = tempfile::tempdir().unwrap();
+        let contract_path = dir.path().join("runner.json");
+        brick_contract::publish(&contract, &contract_path).unwrap();
+        for (name, source, passed) in [
+            ("good", brick_runtime::SELF_SCHEMA.to_owned(), true),
+            (
+                "bad",
+                brick_runtime::SELF_SCHEMA.replacen(
+                    "response_json = '{\"valid\":true}'",
+                    "response_json = '{\"valid\":false}'",
+                    1,
+                ),
+                false,
+            ),
+        ] {
+            let bundle = brick_contract::build(&source).unwrap();
+            let path = dir.path().join(format!("{name}.json"));
+            brick_contract::publish(&bundle, &path).unwrap();
+            let result = Command::new(env!("CARGO_BIN_EXE_brick"))
+                .arg("verify")
+                .arg(path)
+                .args(["--mode", "interface-check", "--via", &address.to_string()])
+                .arg("--contract")
+                .arg(&contract_path)
+                .output()
+                .unwrap();
+            assert_eq!(
+                result.status.success(),
+                passed,
+                "{}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            let receipt: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+            assert_eq!(receipt["passed"], passed);
+            assert_eq!(receipt["bundle_digest"], bundle.digest);
+        }
+    })
+    .await
+    .unwrap();
+    server.shutdown().await.unwrap();
+}

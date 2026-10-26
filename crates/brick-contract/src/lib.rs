@@ -110,11 +110,15 @@ pub struct Compiler {
 
 impl Compiler {
     pub fn discover() -> Result<Self> {
+        Self::discover_with_cancel(&AtomicBool::new(false))
+    }
+
+    pub fn discover_with_cancel(cancel: &AtomicBool) -> Result<Self> {
         let path = compiler_path()?;
         let executable_digest = hash(&fs::read(&path)?);
         let mut command = Command::new(&path);
         command.env_clear().arg("--version");
-        let version = bounded(command, &AtomicBool::new(false), Duration::from_secs(10))?;
+        let version = bounded(command, cancel, Duration::from_secs(10))?;
         ensure!(version.status.success(), "could not identify protoc");
         Ok(Self {
             path,

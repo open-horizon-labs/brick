@@ -32,7 +32,7 @@ fn rejection(output: MessageDescriptor, code: &str) -> Result<DynamicMessage> {
     )
 }
 
-fn encode(output: MessageDescriptor, bundle: &Bundle) -> Result<DynamicMessage> {
+pub(crate) fn encode(output: MessageDescriptor, bundle: &Bundle) -> Result<DynamicMessage> {
     let mut json = serde_json::to_value(bundle)?;
     json.as_object_mut()
         .context("bundle object")?
@@ -48,6 +48,15 @@ fn encode(output: MessageDescriptor, bundle: &Bundle) -> Result<DynamicMessage> 
 
 /// Validate before publication, including exact correspondence to the requested source.
 pub fn decode(response: &DynamicMessage, source: &str) -> Result<Bundle> {
+    let bundle = decode_bundle(response)?;
+    ensure!(
+        bundle.source == source,
+        "generator returned bundle for different source"
+    );
+    Ok(bundle)
+}
+
+pub(crate) fn decode_bundle(response: &DynamicMessage) -> Result<Bundle> {
     ensure!(
         response.has_field_by_name("bundle"),
         "generation rejected: {}",
@@ -82,10 +91,6 @@ pub fn decode(response: &DynamicMessage, source: &str) -> Result<Bundle> {
         compiler.insert("executable_digest".into(), value);
     }
     let bundle: Bundle = serde_json::from_value(json)?;
-    ensure!(
-        bundle.source == source,
-        "generator returned bundle for different source"
-    );
     bundle.validate()?;
     Ok(bundle)
 }

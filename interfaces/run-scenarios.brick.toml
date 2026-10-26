@@ -1,0 +1,69 @@
+format_version = 1
+schema = '''
+syntax = "proto3";
+package brick.run_scenarios.v1;
+// Owns a fresh loopback provider, executes bundle cases in order, then stops it.
+// One active run per runner instance; overlaps return gRPC RESOURCE_EXHAUSTED.
+// 1..32 cases; modes shadow, interface_check, generate_bundle. Recursive runner
+// execution is unsupported. Startup/compiler calls are bounded at 10 seconds;
+// scenario execution has a separate 10-second budget; cleanup at most 4 seconds.
+// Cancellation of a remote client need not stop the run; stopping the runner does.
+// Infrastructure/startup/cleanup failures are gRPC INTERNAL. Scenario mismatch or
+// execution timeout returns a receipt with passed=false after cleanup.
+// Bundle.source is UTF-8 TOML: format_version=1; schema is a standalone proto3
+// string, exactly one package/service, unary methods, no imports. Optional cases
+// contain unique nonempty name, method, request_json, response_json strings.
+// JSON requests/responses must decode against that method's local messages.
+service RunScenarios { rpc Run(RunRequest) returns (RunResponse); }
+message RunRequest { Bundle bundle = 1; string mode = 2; }
+message RunResponse { oneof outcome { Receipt receipt = 1; Rejection rejection = 2; } }
+message Rejection {
+  // INVALID_BUNDLE, UNSUPPORTED_MODE, CASE_LIMIT (requires 1..32 cases).
+  string code = 1;
+}
+message Receipt {
+  // shadow_wiring_verified or component_contract_verified describes evidence kind;
+  // it does not imply success. Always inspect passed.
+  string evidence = 1;
+  string bundle_digest = 2;
+  string executable_digest = 3;
+  CompilerIdentity runtime_compiler = 4;
+  string mode = 5;
+  bool passed = 6;
+  uint32 cases_passed = 7;
+  uint32 elapsed_ms = 8;
+  // server_stopped only after owned listener/compiler cleanup completes.
+  string cleanup = 9;
+  // Always not_enforced in this seed; no OS sandbox claim.
+  string network_sandbox = 10;
+  optional string error = 11;
+}
+message CompilerIdentity { string version = 1; string executable_digest = 2; }
+message Bundle {
+  uint32 format_version = 1;
+  string generator = 2;
+  CompilerIdentity compiler = 3;
+  string source = 4;
+  // Serialized protobuf FileDescriptorSet for interface.proto, one file only.
+  bytes descriptor = 5;
+  // Generated relative Rust filenames mapped to complete UTF-8 source contents.
+  map<string, string> rust_bindings = 6;
+  // Lowercase SHA-256 of compact JSON in this field order, digest="".
+  // JSON uses snake_case keys, descriptor as integer array, rust_bindings sorted
+  // lexically by key, compiler fields version then executable_digest; strings
+  // use JSON UTF-8 escaping. Identifies content, not trusted provenance.
+  string digest = 7;
+}
+'''
+
+[[cases]]
+name = "missing bundle"
+method = "Run"
+request_json = '{"mode": "shadow"}'
+response_json = '{"rejection": {"code": "INVALID_BUNDLE"}}'
+
+[[cases]]
+name = "recursive mode"
+method = "Run"
+request_json = '{"mode": "run_scenarios"}'
+response_json = '{"rejection": {"code": "UNSUPPORTED_MODE"}}'

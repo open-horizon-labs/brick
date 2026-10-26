@@ -32,7 +32,16 @@ fn ctrl_c_reaps_generator_compiler_before_cli_exit() {
     );
 }
 
+#[test]
+fn ctrl_c_reaps_compiler_during_discovery() {
+    cancellation_at(brick_runtime::SELF_SCHEMA, "interface-check", true);
+}
+
 fn cancellation(source: &str, mode: &str) {
+    cancellation_at(source, mode, false);
+}
+
+fn cancellation_at(source: &str, mode: &str, during_discovery: bool) {
     let bundle = brick_contract::build(source).unwrap();
     let dir = tempfile::tempdir().unwrap();
     let bundle_path = dir.path().join("bundle.json");
@@ -40,9 +49,16 @@ fn cancellation(source: &str, mode: &str) {
     let marker = dir.path().join("compiler.pid");
     let compiler = dir.path().join("protoc");
     let quoted_marker = format!("'{}'", marker.to_string_lossy().replace('\'', "'\\''"));
-    fs::write(&compiler, format!(
-        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'libprotoc cancellation-test'; exit 0; fi\necho $$ > {quoted_marker}\nexec /bin/sleep 30\n"
-    )).unwrap();
+    let version = if during_discovery {
+        ""
+    } else {
+        "if [ \"$1\" = \"--version\" ]; then echo 'libprotoc cancellation-test'; exit 0; fi"
+    };
+    fs::write(
+        &compiler,
+        format!("#!/bin/sh\n{version}\necho $$ > {quoted_marker}\nexec /bin/sleep 30\n"),
+    )
+    .unwrap();
     fs::set_permissions(&compiler, fs::Permissions::from_mode(0o755)).unwrap();
     let mut cli = OwnedChild(
         Command::new(env!("CARGO_BIN_EXE_brick"))

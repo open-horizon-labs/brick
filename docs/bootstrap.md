@@ -42,8 +42,12 @@ static rejection examples. The 1 MiB RPC ceiling is narrower than the 8 MiB disk
 bundle ceiling and is an explicit bootstrap transport limit.
 
 ## Next migration sequence
-- Define `RunScenarios` independently. Replace only it with its real provider while
-  generation and other dependencies can remain shadows.
+- RunScenarios is now independently defined and executable as shadow or real
+  provider. Its real adapter owns isolated verification and returns checked receipts;
+  the implementation still delegates to the seed verification engine.
+- Move provider implementations into independently buildable packages and express
+  their dependencies through explicit wiring; the current built-in mode dispatch
+  does not yet give each implementation an isolated compilation graph.
 - Add explicit project graph wiring, provider selection, typed generated clients
   and provider traits, and stateful scenario support as independent increments.
 - Use those components to generate and verify Brick itself. Reduce the seed to

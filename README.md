@@ -105,6 +105,38 @@ Cancelling a remote CLI call leaves the separately owned service running; its ac
 compiler work remains bounded by the ten-second compiler deadline. Stopping the
 service cancels and reaps its compiler. Neither path constitutes an OS sandbox.
 
+## Run verification through Brick
+
+**RunScenarios** is the third real component. Its [standalone contract](interfaces/run-scenarios.brick.toml)
+defines local bundle and receipt types without importing either earlier interface.
+It owns a private provider per accepted run and returns the exact target bundle,
+mode, evidence kind, case count, result, compiler/executable identities, and cleanup.
+
+```sh
+target/debug/brick generate interfaces/run-scenarios.brick.toml --output .brick/runner.json
+target/debug/brick verify .brick/runner.json --mode run-scenarios
+target/debug/brick serve .brick/runner.json --mode run-scenarios
+# In another terminal, use the printed port:
+target/debug/brick verify .brick/check.json --mode interface-check \
+  --via 127.0.0.1:PORT --contract .brick/runner.json
+```
+
+The CLI checks receipt consistency and exits unsuccessfully when `passed=false`.
+The portable runner examples cover rejection behavior. Integration tests separately
+exercise shadow success, real-checker success, deliberately incorrect expectations,
+and a generated runner verifying a generated checker. Those tests establish more
+than merely replaying the runner's examples.
+
+V0 accepts 1–32 cases, one active run **per runner instance**, and the shadow,
+interface-check, or generate-bundle provider. Overlap is rejected as `RUNNER_BUSY`;
+recursive runner execution is rejected. Compiler startup has a ten-second subprocess
+bound, scenario execution a separate ten-second budget, and cleanup up to four
+seconds. This is not a ten-second end-to-end guarantee or a host-wide scheduler.
+Remote client cancellation can leave the bounded run executing; stopping the
+runner signals its owned run, including compiler discovery. A failed scenario or
+execution deadline produces a failed receipt after cleanup; startup/infrastructure
+or cleanup failure produces an RPC error without a successful cleanup claim.
+
 ## Build Brick with Brick
 
 The first real component is **InterfaceCheck**. Its standalone definition can be
@@ -114,7 +146,8 @@ kernel; the component tests exercise it over real local gRPC.
 
 The generator now also runs behind its own Brick boundary. Its algorithm still
 uses the trusted seed kernel for definition loading, compiler invocation, and
-binding generation. Runtime dispatch and the test runner remain seed responsibilities. Those are visible bootstrap responsibilities,
+binding generation. The scenario runner also uses the existing seed verification engine through its
+own interface. Runtime dispatch and all three algorithms remain seed code. Those are visible bootstrap responsibilities,
 not a claim of complete self-hosting. See [the bootstrap plan](docs/bootstrap.md).
 
 The crates have separate roles:
