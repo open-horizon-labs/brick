@@ -10,6 +10,13 @@ tonic supplies gRPC and prost supplies protobuf encoding and bindings.
 
 ## Create a Rust module
 
+Install Rust 1.88 or newer and `protoc`, then clone the repository:
+
+```sh
+git clone https://github.com/open-horizon-labs/brick.git
+cd brick
+```
+
 ```sh
 cargo build --locked -p brick-cli
 target/debug/brick new module hello --path .local/hello
@@ -165,11 +172,11 @@ served as a generated shadow, then replaced by its Rust implementation without
 changing the consumer contract. That implementation calls the bootstrap checking
 kernel; the component tests exercise it over real local gRPC.
 
-The generator now also runs behind its own Brick boundary. Its algorithm still
-uses the trusted seed kernel for definition loading, compiler invocation, and
-binding generation. The scenario runner also uses the existing seed verification engine through its
-own interface. Runtime dispatch and all three algorithms remain seed code. Those are visible bootstrap responsibilities,
-not a claim of complete self-hosting. See [the bootstrap plan](docs/bootstrap.md).
+The independent generator runs its own algorithm and calls a replaceable compiler
+through a typed Brick interface. The CLI's bootstrap path and compatibility harness
+still compose the generator and compiler through `brick-seed`; InterfaceCheck and
+RunScenarios retain bootstrap responsibilities. This is partial self-hosting.
+See [the bootstrap plan](docs/bootstrap.md).
 
 ## Independent generation and replaceable compilation
 
@@ -225,3 +232,7 @@ cargo clippy --locked --workspace --all-targets -- -D warnings
 
 Tests must reject architectural violations and incorrect expectations, not merely
 confirm that the generated shell echoes the examples it was given.
+
+## License
+
+Brick is available under the [MIT license](LICENSE).
